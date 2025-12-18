@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Poetry / VirtualEnvs
+.venv/
+poetry.lock
+
+# Ignorer les gros fichiers de données
+*.csv
+data/
+raw_recipes.csv
+
+# Ignorer la Base de Données
+*.db
+*.sqlite3
+smartretail.db
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

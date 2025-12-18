@@ -1,0 +1,31 @@
+[project]
+name = "smartretail-recsys"
+version = "0.1.0"
+description = "Moteur de recommandation et planification de menus"
+authors = [
+    {name = "Cyrille ELIE",email = "cyrille.elie@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pandas (>=2.3.3,<3.0.0)",
+    "numpy (>=2.3.5,<3.0.0)",
+    "sqlalchemy (>=2.0.45,<3.0.0)",
+    "ortools (>=9.14.6206,<10.0.0)",
+    "fastapi (>=0.125.0,<0.126.0)",
+    "uvicorn (>=0.38.0,<0.39.0)",
+    "sentence-transformers (>=5.2.0,<6.0.0)",
+    "streamlit (>=1.52.2,<2.0.0)",
+    "requests (>=2.32.5,<3.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "ipykernel (>=7.1.0,<8.0.0)",
+    "pytest (>=9.0.2,<10.0.0)"
+]
