@@ -81,15 +81,30 @@ cd smartretail-recsys
 poetry install
 ```
 
-### 2. Initialization
-Initialize the database and vector embeddings (takes ~1 min).
+### 2. Data Setup (Crucial Step)
+Since raw data is not hosted on GitHub (file size limit), you need to download it manually:
+1.  Create the data directory:
+    ```bash
+    mkdir -p data/raw
+    ```
+2.  Download the **Food.com Recipes Dataset** (specifically `RAW_recipes.csv`) from Kaggle:
+    * [Link to Dataset](https://www.kaggle.com/datasets/shuyangli98/food-com-recipes-and-user-interactions)
+3.  Place the file at: `data/raw/RAW_recipes.csv`
+
+### 3. Initialization
+Once the CSV is in place, run the initialization scripts to generate the SQL Database and Vector Embeddings.
 ```bash
+# 1. Ingest CSV into SQLite
 poetry run python -m src.database.init_db
+
+# 2. Simulate User History (Cold Start)
 poetry run python -m src.simulation.user_simulator
+
+# 3. Generate NLP Embeddings (this takes ~1-2 mins)
 poetry run python -m src.recommender.vectorizer
 ```
 
-### 3. Running the App
+### 4. Running the App
 Launch the API and the Dashboard in two separate terminals.
 
 **Terminal 1 (Backend):**
