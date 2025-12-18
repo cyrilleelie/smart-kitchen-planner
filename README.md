@@ -88,7 +88,7 @@ Since raw data is not hosted on GitHub (file size limit), you need to download i
     mkdir -p data/raw
     ```
 2.  Download the **Food.com Recipes Dataset** (specifically `RAW_recipes.csv`) from Kaggle:
-    * [Link to Dataset](https://www.kaggle.com/datasets/shuyangli98/food-com-recipes-and-user-interactions)
+    * [Link to Dataset](https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions)
 3.  Place the file at: `data/raw/RAW_recipes.csv`
 
 ### 3. Initialization
