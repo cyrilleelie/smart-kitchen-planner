@@ -1,40 +1,24 @@
 import json
 from sentence_transformers import SentenceTransformer
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
+# Import de la connexion centralisée
+from src.database.connection import engine
 from src.database.models import Recipe
 
-def generate_embeddings():
+def generate_recipe_embeddings():
     print("🧠 Chargement du modèle NLP (Sentence-BERT)...")
+    # Chargement du modèle (téléchargé automatiquement au premier lancement)
     model = SentenceTransformer('all-MiniLM-L6-v2')
     
-    engine = create_engine("sqlite:///smartretail.db")
-    
     with Session(engine) as session:
-        print("📂 Récupération de TOUTES les recettes pour forcer la vectorisation...")
+        # 1. Récupérer les recettes sans embedding (ou toutes si on veut forcer la mise à jour)
+        # Pour optimiser, on ne prend que celles où embedding est NULL
+        recipes = session.query(Recipe).filter(Recipe.embedding == None).all()
         
-        # CHANGEMENT ICI : On prend tout, sans filtre conditionnel hasardeux
-        recipes = session.query(Recipe).all() 
+        total = len(recipes)
+        print(f"   -> {total} recettes à vectoriser trouvées.")
         
-        print(f"🔄 Vectorisation de {len(recipes)} recettes en cours...")
-        print("   (Cela va prendre environ 60-90 secondes, patientez...)")
-        
-        texts = []
-        for r in recipes:
-            # Concaténation Nom + Tags pour le contexte
-            tags_str = " ".join(r.tags) if r.tags else ""
-            full_text = f"{r.name} {tags_str}"
-            texts.append(full_text)
-        
-        # Encodage
-        embeddings = model.encode(texts, show_progress_bar=True)
-        
-        print("💾 Sauvegarde en base...")
-        for i, recipe in enumerate(recipes):
-            recipe.embedding = embeddings[i].tolist()
-        
-        session.commit()
-        print(f"✅ Terminé ! {len(recipes)} recettes ont été mises à jour.")
-
-if __name__ == "__main__":
-    generate_embeddings()
+        if total == 0:
+            print("✨ Tout est déjà vectorisé. Rien à faire.")
+            return

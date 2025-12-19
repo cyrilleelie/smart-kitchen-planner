@@ -3,29 +3,45 @@ name = "smartretail-recsys"
 version = "0.1.0"
 description = "Moteur de recommandation et planification de menus"
 authors = [
-    {name = "Cyrille ELIE",email = "cyrille.elie@gmail.com"}
+    {name = "Cyrille ELIE", email = "cyrille.elie@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "pandas (>=2.3.3,<3.0.0)",
-    "numpy (>=2.3.5,<3.0.0)",
-    "sqlalchemy (>=2.0.45,<3.0.0)",
-    "ortools (>=9.14.6206,<10.0.0)",
-    "fastapi (>=0.125.0,<0.126.0)",
-    "uvicorn (>=0.38.0,<0.39.0)",
-    "sentence-transformers (>=5.2.0,<6.0.0)",
-    "streamlit (>=1.52.2,<2.0.0)",
-    "requests (>=2.32.5,<3.0.0)"
-]
-
+requires-python = "^3.12"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-[dependency-groups]
-dev = [
-    "ipykernel (>=7.1.0,<8.0.0)",
-    "pytest (>=9.0.2,<10.0.0)"
-]
+# --- DÉPENDANCES ---
+# Nous utilisons le format [tool.poetry.dependencies] pour pouvoir spécifier
+# la "source" pour Torch (indispensable pour éviter le téléchargement NVIDIA).
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pandas = "^2.2.0"
+numpy = "^1.26.0"  # Numpy 2.x peut causer des conflits avec certaines libs, 1.26 est plus sûr pour l'instant
+sqlalchemy = "^2.0.0"
+ortools = "^9.10.0"
+fastapi = "^0.110.0"
+uvicorn = "^0.29.0"
+streamlit = "^1.32.0"
+requests = "^2.31.0"
+psycopg2-binary = "^2.9.9"
+
+# C'est ICI que la magie opère pour Docker :
+# On force l'installation de PyTorch version CPU (léger) depuis la source définie plus bas.
+torch = { version = "^2.2.0", source = "pytorch-cpu" }
+torchvision = { version = "^0.17.0", source = "pytorch-cpu" } 
+
+# Correction: sentence-transformers est en version 3.x max actuellement
+sentence-transformers = "^3.0.0"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.0"
+pytest = "^8.0.0"
+
+# --- DÉFINITION DE LA SOURCE CPU ---
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"

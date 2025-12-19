@@ -14,7 +14,7 @@ def check_model_health(user_id: int):
         # On récupère les 20 dernières interactions (les plus récentes)
         recent_interactions = session.query(Interaction)\
             .filter(Interaction.user_id == user_id)\
-            .order_by(desc(Interaction.timestamp))\
+            .order_by(desc(Interaction.date))\
             .limit(20)\
             .all()
         

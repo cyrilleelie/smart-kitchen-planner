@@ -1,88 +1,113 @@
 import streamlit as st
 import requests
-import pandas as pd
 
-# --- CONFIGURATION ---
-API_URL = "http://127.0.0.1:8000"
-st.set_page_config(page_title="SmartRetail Planner", layout="wide", page_icon="🍽️")
+# 1. Configuration de la page
+st.set_page_config(
+    page_title="Smart Retail AI",
+    page_icon="🥗",
+    layout="wide"
+)
 
-# --- CSS CUSTOM (Pour un look un peu plus 'Luxury') ---
-st.markdown("""
-<style>
-    .metric-card {background-color: #f0f2f6; border-radius: 10px; padding: 15px; text-align: center;}
-    .recipe-card {border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 10px; background: white;}
-    .day-header {color: #FF4B4B; font-weight: bold; font-size: 1.1em;}
-</style>
-""", unsafe_allow_html=True)
+API_URL = "http://localhost:8000"
 
-# --- SIDEBAR : CONTRÔLES ---
-st.sidebar.title("🎛️ Paramètres")
-st.sidebar.markdown("Configurez vos contraintes pour générer le planning idéal.")
+def main():
+    # --- GESTION DE LA MÉMOIRE (SESSION STATE) ---
+    # C'est ici qu'on stocke le menu pour qu'il ne disparaisse pas au clic
+    if 'generated_data' not in st.session_state:
+        st.session_state['generated_data'] = None
 
-# Simulation du login (Pour l'instant ID 1)
-user_id = st.sidebar.number_input("ID Utilisateur", value=1, step=1)
+    # --- BARRE LATÉRALE ---
+    with st.sidebar:
+        st.header("🎛️ Paramètres")
+        user_id = st.number_input("ID Utilisateur", min_value=1, value=1, step=1)
+        days = st.slider("Nombre de jours", min_value=1, max_value=5, value=2)
+        target_cal = st.number_input("Objectif Calories", min_value=1200, max_value=4000, value=2000, step=100)
+        
+        st.markdown("---")
+        # Le bouton sert uniquement à LANCER le calcul
+        generate_btn = st.button("🚀 Générer Planning", type="primary", use_container_width=True)
 
-st.sidebar.divider()
+    # --- LOGIQUE DE GÉNÉRATION ---
+    if generate_btn:
+        with st.spinner("🧠 L'IA travaille..."):
+            try:
+                payload = {"user_id": user_id, "days": days, "target_calories": target_cal}
+                response = requests.post(f"{API_URL}/generate-menu", json=payload)
+                
+                if response.status_code == 200:
+                    # ### CORRECTION IMPORTANTE ###
+                    # On ne traite pas les données tout de suite, on les SAUVEGARDE en mémoire
+                    st.session_state['generated_data'] = response.json()
+                    st.toast("Nouveau menu généré !", icon="✅")
+                else:
+                    st.error(f"Erreur API : {response.text}")
+            except Exception as e:
+                st.error(f"Erreur connexion : {e}")
 
-# Contraintes
-days = st.sidebar.slider("Durée (Jours)", 1, 7, 7)
-time_max = st.sidebar.slider("Temps max cuisine (min)", 10, 120, 45, step=5)
-cal_range = st.sidebar.slider("Cible Calories / Repas", 300, 1500, (400, 1000), step=50)
+    # --- LOGIQUE D'AFFICHAGE (DÉCORRELÉE) ---
+    # Ce bloc s'exécute à chaque rafraichissement SI des données existent en mémoire
+    if st.session_state['generated_data']:
+        data = st.session_state['generated_data']
+        menu = data.get("menu", [])
+        meta = data.get("meta", {})
+        
+        # Titre et Infos
+        st.title("🥗 Smart Kitchen AI")
+        total_cals = meta.get('total_calories', 0)
+        st.info(f"📊 **Total : {total_cals:.0f} kcal** (Moyenne : {total_cals/days:.0f} kcal/jour)")
 
-generate_btn = st.sidebar.button("🚀 Générer le Menu", type="primary")
-
-# --- MAIN : AFFICHAGE ---
-st.title("🍽️ SmartRetail Menu Planner")
-st.markdown(f"Bienvenue. Conception de menu optimisée pour l'utilisateur **#{user_id}**.")
-
-if generate_btn:
-    with st.spinner("L'IA analyse vos goûts et optimise le planning..."):
-        try:
-            # Appel à VOTRE API
-            payload = {
-                "user_id": user_id,
-                "days": days,
-                "max_prep_time": time_max,
-                "target_calories_min": cal_range[0],
-                "target_calories_max": cal_range[1]
-            }
-            response = requests.post(f"{API_URL}/generate-menu", json=payload)
+        if not menu:
+            st.warning("Menu vide.")
+        else:
+            # Layout Colonnes
+            meals_per_day = 3
+            day_cols = st.columns(days)
             
-            if response.status_code == 200:
-                data = response.json()
-                
-                # 1. Affichage des KPIs
-                stats = data['stats']
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Satisfaction IA", f"{stats['avg_satisfaction']}/100", delta_color="normal")
-                col2.metric("Moyenne Calories", f"{stats['avg_calories']} kcal")
-                col3.metric("Recettes Uniques", f"{len(data['plan'])}")
-                
-                st.divider()
-                
-                # 2. Affichage du Planning (Grille)
-                # On divise l'écran en 3 ou 4 colonnes selon la largeur
-                cols = st.columns(4)
-                
-                for idx, meal in enumerate(data['plan']):
-                    # Modulo pour revenir à la ligne
-                    with cols[idx % 4]:
-                        st.markdown(f"""
-                        <div class="recipe-card">
-                            <div class="day-header">JOUR {meal['day']}</div>
-                            <h3>{meal['recipe_name'].title()}</h3>
-                            <p>⏱️ {meal['time']} min | 🔥 {meal['calories']} kcal</p>
-                            <progress value="{meal['match_score']}" max="100"></progress>
-                            <small>Match IA: {meal['match_score']}%</small>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-            else:
-                st.error(f"Erreur du solveur : {response.json().get('detail')}")
-                
-        except requests.exceptions.ConnectionError:
-            st.error("🚨 Impossible de contacter l'API. Vérifiez que 'src.api.app' tourne bien dans un autre terminal !")
+            for day_idx in range(days):
+                with day_cols[day_idx]:
+                    st.markdown(f"### 📅 Jour {day_idx + 1}")
+                    st.markdown("---")
+                    
+                    start = day_idx * meals_per_day
+                    end = start + meals_per_day
+                    daily_menu = menu[start:end]
+                    
+                    for item in daily_menu:
+                        with st.container(border=True):
+                            st.markdown(f"**{item['name'].title()}**")
+                            
+                            # Tags
+                            tags_raw = item.get('tags', [])
+                            tags_clean = tags_raw.replace('[','').replace(']','').replace("'", "").split(',') if isinstance(tags_raw, str) else tags_raw
+                            st.caption(f"🏷️ {', '.join(tags_clean[:2])}")
+                            
+                            # Metrics
+                            c1, c2 = st.columns(2)
+                            with c1: st.markdown(f"🔥 **{item.get('calories', 0):.0f}**")
+                            with c2: st.markdown(f"❤️ **{int(item.get('score', 0)*100)}%**")
+                            
+                            st.markdown("---")
+                            
+                            # ### BOUTON FEEDBACK ###
+                            # Maintenant que l'affichage est stable, ce bouton va fonctionner
+                            btn_key = f"like_{day_idx}_{item['id']}"
+                            
+                            if st.button("J'aime ❤️", key=btn_key, use_container_width=True):
+                                # Appel API Feedback
+                                try:
+                                    requests.post(f"{API_URL}/feedback", json={
+                                        "user_id": user_id,
+                                        "recipe_id": item['id'],
+                                        "rating": 5
+                                    })
+                                    st.toast(f"Recette '{item['name']}' likée !", icon="😋")
+                                except Exception as e:
+                                    st.error("Erreur API Feedback")
+    
+    # Message d'accueil si rien n'est généré
+    elif not generate_btn:
+        st.title("🥗 Smart Kitchen AI")
+        st.info("👈 Configurez vos paramètres à gauche et cliquez sur Générer pour commencer.")
 
-# --- FOOTER ---
-st.markdown("---")
-st.caption("Architecture: Database SQL • Sentence-BERT NLP • OR-Tools Solver • FastAPI • Streamlit")
+if __name__ == "__main__":
+    main()
