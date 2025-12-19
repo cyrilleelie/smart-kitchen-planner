@@ -2,7 +2,8 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime # <--- N'oubliez pas cet import tout en haut !
+from datetime import datetime
+from collections import Counter
 
 # Imports du projet
 from src.database.connection import get_db
@@ -24,12 +25,66 @@ class FeedbackRequest(BaseModel):
     recipe_id: int
     rating: int  # 5 = J'aime, 1 = Je n'aime pas
 
+TAG_BLACKLIST = {
+    # Méta-catégories techniques (ce que vous voyiez)
+    "main-ingredient", "low-in-something", "dietary", "occasion", "course", 
+    "preparation", "equipment", "technique", "number-of-servings", "meat", 
+    "vegetables", "fruit", # Ces 3 derniers sont souvent des catégories parentes trop vagues
+    
+    # Temps et difficulté
+    "time-to-make", "easy", "beginner-cook", "inexpensive", "healthy", "healthy-2",
+    "5-minutes-or-less", "15-minutes-or-less", "30-minutes-or-less", 
+    "60-minutes-or-less", "4-hours-or-less", "less-thans",
+    
+    # Infos nutritionnelles génériques (sauf si vous voulez tracker le régime)
+    "low-sodium", "low-cholesterol", "low-saturated-fat", "low-calorie", 
+    "low-protein", "low-carb", "high-calcium", "high-in-something"
+}
+
 # --- Endpoints ---
 
 @app.get("/")
 def root():
     """Route de vérification de santé"""
     return {"status": "online", "message": "SmartRetail API is running 🚀"}
+
+@app.get("/user/{user_id}/profile")
+def get_user_profile(user_id: int, db: Session = Depends(get_db)):
+    """
+    Analyse l'historique en filtrant agressivement les tags techniques.
+    """
+    liked_interactions = db.query(Interaction).join(Recipe).filter(
+        Interaction.user_id == user_id,
+        Interaction.rating >= 4
+    ).all()
+
+    if not liked_interactions:
+        return {"status": "empty", "message": "Pas assez de données"}
+
+    tag_counter = Counter()
+    total_likes = len(liked_interactions)
+    
+    for interaction in liked_interactions:
+        raw_tags = interaction.recipe.tags
+        if isinstance(raw_tags, str):
+            clean_tags = raw_tags.replace('[', '').replace(']', '').replace("'", "").split(',')
+            clean_tags = [t.strip() for t in clean_tags if t.strip()]
+        else:
+            clean_tags = raw_tags
+        
+        # Filtrage
+        filtered_tags = [t for t in clean_tags if t not in TAG_BLACKLIST]
+        tag_counter.update(filtered_tags)
+
+    # On prend le top 10
+    top_tags = tag_counter.most_common(10)
+    
+    return {
+        "user_id": user_id,
+        "total_likes": total_likes,
+        "favorite_tags": [{"tag": t, "count": c} for t, c in top_tags],
+        "last_interaction": liked_interactions[-1].date if liked_interactions else None
+    }
 
 # --- Nouvelle Route ---
 @app.post("/feedback")
