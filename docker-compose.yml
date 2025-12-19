@@ -19,7 +19,8 @@ services:
       - db
     environment:
       # L'URL de connexion : on utilise le nom du service 'db' comme hôte
-      DATABASE_URL: postgresql://user:password@db:5432/smartretail
+      - DATABASE_URL=postgresql://user:password@db:5432/smartretail
+      - PYTHONPATH=/app
     ports:
       - "8000:8000"
       - "8501:8501"

@@ -58,3 +58,13 @@ class UserProfiler:
                 candidates.append((recipe, fake_score))
 
         return candidates
+    
+    def get_user_ratings(self, user_id: int) -> dict:
+        """
+        Récupère tout l'historique d'un utilisateur sous forme de dict
+        Exemple retour : {102: 5, 450: 3, ...}
+        """
+        interactions = self.session.query(Interaction).filter(
+            Interaction.user_id == user_id
+        ).all()
+        return {i.recipe_id: i.rating for i in interactions}
