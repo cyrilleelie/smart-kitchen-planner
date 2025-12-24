@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import func
 from src.database.models import User, Interaction, Recipe
+from collections import Counter
 import random
 
 class UserProfiler:
@@ -19,44 +20,76 @@ class UserProfiler:
         ).all()
         return [i.recipe_id for i in interactions]
 
+    # N'oubliez pas d'importer Counter en haut du fichier
+    from collections import Counter 
+
     def recommend_candidates(self, user_id: int, limit: int = 100):
-        """
-        Stratégie Hybride :
-        1. Essaie de trouver des recommandations IA (basées sur l'historique)
-        2. Si pas assez de données, complète avec de l'aléatoire (Découverte)
-        """
         candidates = []
         
-        # --- PHASE 1 : RECUPERATION BASEE SUR L'HISTORIQUE ---
-        # (Ici, on pourrait mettre la logique FAISS / Vectorielle)
-        # Pour l'instant, simulons une logique simple :
-        # On ne veut pas recommander ce qu'il a déjà mangé récemment
-        # ... (Logique placeholder) ...
+        # --- 1. ANALYSE FINE DU PROFIL ---
+        liked_interactions = self.session.query(Interaction).join(Recipe).filter(
+            Interaction.user_id == user_id, 
+            Interaction.rating >= 4
+        ).all()
         
-        # --- PHASE 2 : REMPLISSAGE (COLD START) ---
-        # Si on n'a pas atteint la limite (ce qui est le cas actuellement),
-        # on va chercher des recettes au hasard dans la BDD pour donner du choix au solveur.
-        
-        current_count = len(candidates)
-        missing = limit - current_count
-        
-        if missing > 0:
-            print(f"⚠️ Cold Start : Ajout de {missing} recettes aléatoires pour nourrir le solveur.")
+        # On compte la fréquence des tags pour pondérer
+        tag_counter = Counter()
+        for i in liked_interactions:
+            raw = i.recipe.tags
+            if isinstance(raw, str):
+                clean = raw.replace('[','').replace(']','').replace("'", "").split(',')
+                clean = [t.strip() for t in clean]
+            else:
+                clean = raw
+            tag_counter.update(clean)
             
-            # Récupération de recettes aléatoires via PostgreSQL (func.random())
-            random_recipes = self.session.query(Recipe)\
-                .order_by(func.random())\
-                .limit(missing)\
-                .all()
+        # BLACKLIST (Technique)
+        BLACKLIST = {
+            "time-to-make", "preparation", "course", "main-ingredient", "dietary",
+            "easy", "number-of-servings", "technique", "equipment", "5-minutes-or-less",
+            "15-minutes-or-less", "30-minutes-or-less", "60-minutes-or-less"
+        }
+        
+        # On ne garde que le TOP 20 des tags les plus fréquents chez l'user
+        # Cela évite qu'un tag vu une seule fois ne pollue tout
+        most_common_tags = [t for t, c in tag_counter.most_common(20) if t not in BLACKLIST]
+        
+        # --- 2. SCORING PLUS STRICT ---
+        if most_common_tags:
+            # On scanne un échantillon plus large (1000) pour filtrer
+            pool = self.session.query(Recipe).limit(1000).all()
             
-            for recipe in random_recipes:
-                # On attribue un score artificiel
-                # Un peu d'aléatoire pour que le solveur ne prenne pas toujours les mêmes
-                fake_score = random.uniform(0.1, 0.9) 
+            for recipe in pool:
+                r_tags = str(recipe.tags)
+                # On compte combien de tags du TOP 20 sont présents dans la recette
+                match_count = sum(1 for tag in most_common_tags if tag in r_tags)
                 
-                # Format (Recipe, Score) attendu par le solveur
-                candidates.append((recipe, fake_score))
-
+                if match_count > 0:
+                    # NOUVELLE FORMULE :
+                    # Base : 0.5 (Moyenne)
+                    # Bonus : +3% par tag matché
+                    # Plafond : 0.98
+                    score = 0.5 + (match_count * 0.03)
+                    score = min(score, 0.98) # Cap
+                    
+                    # On ne garde que ceux qui dépassent la moyenne (0.5)
+                    candidates.append((recipe, score))
+        
+        # Tri décroissant par score
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        
+        # --- 3. REMPLISSAGE (Si besoin) ---
+        candidates = candidates[:limit] # On garde les meilleurs
+        
+        missing = limit - len(candidates)
+        if missing > 0:
+            random_recipes = self.session.query(Recipe).order_by(func.random()).limit(missing).all()
+            for recipe in random_recipes:
+                # Score pénalisé pour l'aléatoire (0.1 - 0.4)
+                # Ainsi, le solveur privilégiera TOUJOURS les recettes matchées (0.5+)
+                score = random.uniform(0.1, 0.4)
+                candidates.append((recipe, score))
+        
         return candidates
     
     def get_user_ratings(self, user_id: int) -> dict:
