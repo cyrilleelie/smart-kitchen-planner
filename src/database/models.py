@@ -24,6 +24,7 @@ class Recipe(Base):
     calories = Column(Float)
     n_steps = Column(Integer, nullable=True)
     nutrition_info = Column(JSON, nullable=True)
+    ingredients = Column(Text) # Stocké comme string "['chicken', 'salt']"
     
     # AJOUT CRUCIAL 1 : La colonne pour stocker le vecteur IA
     embedding = Column(JSON, nullable=True)
