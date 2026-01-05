@@ -1,119 +1,136 @@
 import streamlit as st
 import requests
-from sqlalchemy.sql.expression import func
-import sys
-import os
 
-# Fix du Path pour Docker
-sys.path.append("/app")
+st.set_page_config(page_title="Exploration", page_icon="🔥")
 
-from src.database.connection import get_db
-from src.database.models import Recipe, Interaction
-
-st.set_page_config(page_title="Mode Exploration", page_icon="🔥")
-API_URL = "http://localhost:8000"
+API_URL = "http://app:8000"
 
 def main():
-    st.title("🔥 Mode Exploration")
-    st.markdown("Notez des recettes pour affiner votre profil IA !")
+    st.title("🔥 Exploration Illimitée")
+    st.caption("Découvrez tout le catalogue. L'IA vous propose uniquement ce que vous ne connaissez pas.")
 
-    if 'user_id' not in st.session_state:
-        st.session_state['user_id'] = 1
-    user_id = st.session_state['user_id']
+    user_id = st.sidebar.number_input("ID Utilisateur", value=1, step=1)
+
+    # --- GESTION ÉTAT ---
+    # On stocke une pile (stack) de recettes pour éviter d'appeler l'API à chaque clic
+    if 'recipe_stack' not in st.session_state:
+        st.session_state['recipe_stack'] = []
     
-    # Connexion BDD
-    try:
-        db = next(get_db())
-    except Exception as e:
-        st.error(f"Erreur BDD: {e}")
-        return
-
-    # --- 1. CHARGER UNE NOUVELLE RECETTE (Si besoin) ---
     if 'current_recipe' not in st.session_state:
-        # On exclut les recettes déjà notées
-        rated_subquery = db.query(Interaction.recipe_id).filter(Interaction.user_id == user_id)
-        
-        # Tirage au sort d'une recette NON notée
-        recipe = db.query(Recipe)\
-            .filter(Recipe.id.notin_(rated_subquery))\
-            .order_by(func.random())\
-            .first()
-        
-        if recipe:
-            # On stocke en session
-            st.session_state['current_recipe'] = {
-                "id": recipe.id,
-                "name": recipe.name,
-                "description": recipe.description,
-                "minutes": recipe.minutes,
-                "tags": recipe.tags
-            }
-        else:
-            st.success("🎉 Vous avez fait le tour de toutes les recettes !")
-            if st.button("Recommencer à zéro (Reset)"):
-                # Optionnel : logique de reset
-                pass
-            return
+        st.session_state['current_recipe'] = None
 
-    # --- 2. AFFICHAGE DE LA CARTE ---
-    rec = st.session_state['current_recipe']
-    
-    with st.container(border=True):
-        st.header(rec['name'].title())
+    # --- FONCTIONS ---
+    def fetch_new_recipes():
+        """Récupère un lot de nouvelles recettes fraîches"""
+        try:
+            # On en demande 5 d'un coup pour fluidifier l'expérience
+            resp = requests.get(f"{API_URL}/explore", params={"user_id": user_id, "limit": 5})
+            if resp.status_code == 200:
+                new_batch = resp.json()
+                if new_batch:
+                    # On ajoute le batch à notre pile locale
+                    st.session_state['recipe_stack'].extend(new_batch)
+        except Exception as e:
+            st.error(f"Erreur connexion : {e}")
+
+    def load_next_from_stack():
+        """Prend la prochaine recette de la pile"""
+        # Si la pile est vide, on va chercher du stock
+        if not st.session_state['recipe_stack']:
+            fetch_new_recipes()
         
-        # Tags
-        tags = str(rec['tags']).replace('[','').replace(']','').replace("'", "")
-        st.caption(f"⏱️ {rec['minutes']} min • 🏷️ {tags[:100]}...")
-        
-        if rec['description']:
-            st.info(rec['description'])
-        
-        st.divider()
-        st.subheader("Votre avis ?")
-        
-        # --- 3. LOGIQUE AUTOMATIQUE ---
-        
-        # Cette fonction est appelée AUTOMATIQUEMENT dès qu'on touche aux étoiles
-        def submit_rating():
-            # On récupère la valeur via la clé dynamique
-            widget_key = f"rate_{rec['id']}"
+        # Si après fetch c'est toujours vide, c'est qu'on a TOUT noté !
+        if st.session_state['recipe_stack']:
+            st.session_state['current_recipe'] = st.session_state['recipe_stack'].pop(0)
+        else:
+            st.session_state['current_recipe'] = "DONE"
+
+    # --- CALLBACKS ---
+    def submit_rating():
+        recipe = st.session_state['current_recipe']
+        if recipe and recipe != "DONE":
+            # Récupération note
+            widget_key = f"rating_{recipe['id']}"
             val = st.session_state.get(widget_key)
             
             if val is not None:
-                # 1. Envoi API
+                final_score = val + 1
+                
+                # Envoi asynchrone (on n'attend pas la réponse pour changer l'UI)
                 try:
-                    score = val + 1 # 0-4 -> 1-5
                     requests.post(f"{API_URL}/feedback", json={
-                        "user_id": user_id,
-                        "recipe_id": rec['id'],
-                        "rating": score
+                        "user_id": user_id, 
+                        "recipe_id": recipe['id'], 
+                        "rating": final_score
                     })
-                    st.toast(f"Avis enregistré ({score}/5) !", icon="✅")
-                except Exception as e:
-                    st.error(f"Erreur API : {e}")
-            
-            # 2. NETTOYAGE POUR LE PASSAGE AUTOMATIQUE
-            # On supprime la recette courante de la mémoire
-            if 'current_recipe' in st.session_state:
-                del st.session_state['current_recipe']
-            
-            # Pas besoin de st.rerun(), le callback on_change le fait implicitement
-        
-        # --- WIDGET ÉTOILES ---
-        # TRUC CLÉ : key=f"rate_{rec['id']}"
-        # Comme l'ID change à chaque recette, Streamlit crée un NOUVEAU widget à chaque fois (donc vide)
-        st.feedback(
-            "stars", 
-            key=f"rate_{rec['id']}", 
-            on_change=submit_rating
-        )
-        
-        st.markdown("---")
-        
-        # Bouton pour passer sans noter
-        if st.button("Passer cette recette ➡️", use_container_width=True):
-            del st.session_state['current_recipe']
+                    st.toast(f"Noté {final_score}/5 ⭐")
+                except:
+                    pass
+                
+                # Suivant !
+                load_next_from_stack()
+
+    def skip_recipe():
+        st.toast("Passé ⏭️")
+        load_next_from_stack()
+
+    # --- INITIALISATION ---
+    if st.session_state['current_recipe'] is None:
+        load_next_from_stack()
+
+    # --- AFFICHAGE ---
+    recipe = st.session_state['current_recipe']
+
+    if recipe == "DONE":
+        st.balloons()
+        st.success("🏆 INCROYABLE ! Vous avez noté l'intégralité de la base de données !")
+        st.info("Revenez quand nous aurons ajouté de nouvelles recettes.")
+        if st.button("Recommencer (Reset Stack)"):
+            st.session_state['recipe_stack'] = []
+            st.session_state['current_recipe'] = None
             st.rerun()
+
+    elif recipe:
+        with st.container(border=True):
+            # Header
+            st.header(recipe['name'])
+            tags_clean = recipe.get('tags', '').replace('[','').replace(']','').replace("'", "").split(',')
+            st.caption(f"🏷️ {', '.join(tags_clean[:4])} | 🔥 {int(recipe.get('calories', 0))} kcal")
+            
+            st.divider()
+
+            # Ingrédients
+            with st.expander("🛒 Voir les ingrédients", expanded=False):
+                ing_raw = recipe.get('ingredients', '[]')
+                if isinstance(ing_raw, str):
+                    ing_clean = ing_raw.replace('[','').replace(']','').replace("'", "").split(',')
+                    for ing in ing_clean: 
+                        if ing.strip(): st.markdown(f"- {ing.strip()}")
+            
+            st.markdown("#### Notez ce plat :")
+            
+            # Notation avec Auto-Switch
+            st.feedback(
+                "stars", 
+                key=f"rating_{recipe['id']}", 
+                on_change=submit_rating
+            )
+            
+            st.markdown("---")
+            
+            # Bouton Passer
+            c1, c2 = st.columns([1, 4])
+            with c1:
+                st.button("Passer ⏭️", on_click=skip_recipe, use_container_width=True)
+            with c2:
+                # Debug info (optionnel, pour voir le stock)
+                remaining = len(st.session_state['recipe_stack'])
+                st.caption(f"En cache : {remaining} recettes prêtes")
+
+    else:
+        st.warning("Chargement...")
+        load_next_from_stack()
+        st.rerun()
 
 if __name__ == "__main__":
     main()

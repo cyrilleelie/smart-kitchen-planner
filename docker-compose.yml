@@ -28,7 +28,7 @@ services:
       - ./src:/app/src
       - ./data:/app/data
     # Lancement simultané API + Streamlit
-    command: sh -c "uvicorn src.api.app:app --host 0.0.0.0 --port 8000 & streamlit run src/ui/dashboard.py --server.port 8501 --server.address 0.0.0.0"
+    command: sh -c "uvicorn src.api.app:app --host 0.0.0.0 --port 8000 & streamlit run src/ui/Home.py --server.port 8501 --server.address 0.0.0.0"
 
 volumes:
   postgres_data:
