@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, not_
 from typing import List, Optional
 from datetime import datetime
 from collections import Counter
@@ -152,3 +153,40 @@ def generate_menu(request: MenuRequest, db: Session = Depends(get_db)):
             "days": request.days
         }
     }
+
+@app.get("/user/{user_id}/interactions")
+def get_user_interactions(user_id: int, db: Session = Depends(get_db)):
+    """Récupère l'historique complet des notes de l'utilisateur"""
+    interactions = db.query(Interaction).filter(Interaction.user_id == user_id).all()
+    # On renvoie un dictionnaire simple : {recipe_id: note}
+    return {i.recipe_id: i.rating for i in interactions}
+
+@app.get("/explore")
+def explore_recipes(user_id: int, limit: int = 5, db: Session = Depends(get_db)):
+    """
+    Renvoie des recettes aléatoires que l'utilisateur n'a JAMAIS notées.
+    """
+    # 1. Sous-requête : Les IDs déjà notés par l'utilisateur
+    rated_subquery = db.query(Interaction.recipe_id).filter(
+        Interaction.user_id == user_id
+    )
+
+    # 2. Requête principale : Recettes NOT IN (déjà notés)
+    # On trie aléatoirement (func.random() pour Postgres)
+    candidates = db.query(Recipe).filter(
+        Recipe.id.notin_(rated_subquery)
+    ).order_by(func.random()).limit(limit).all()
+
+    # 3. Formatage
+    results = []
+    for r in candidates:
+        results.append({
+            "id": r.id,
+            "name": r.name,
+            "calories": r.calories,
+            "minutes": r.minutes,
+            "tags": str(r.tags),
+            "ingredients": str(r.ingredients)
+        })
+
+    return results
