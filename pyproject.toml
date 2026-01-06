@@ -17,7 +17,7 @@ build-backend = "poetry.core.masonry.api"
 # la "source" pour Torch (indispensable pour éviter le téléchargement NVIDIA).
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = ">=3.12,<3.15"
 pandas = "^2.2.0"
 numpy = "^1.26.0"  # Numpy 2.x peut causer des conflits avec certaines libs, 1.26 est plus sûr pour l'instant
 sqlalchemy = "^2.0.0"
@@ -35,6 +35,9 @@ torchvision = { version = "^0.17.0", source = "pytorch-cpu" }
 
 # Correction: sentence-transformers est en version 3.x max actuellement
 sentence-transformers = "^3.0.0"
+scikit-learn = "^1.8.0"
+spacy = "^3.8.11"
+joblib = "^1.5.3"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.0"
