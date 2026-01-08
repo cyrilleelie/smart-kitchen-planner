@@ -1,119 +1,143 @@
-# 🥗 SmartRetail RecSys (Dockerized)
+# 🥗 Smart Kitchen Planner (Smart Retail 2.0)
 
-> **Projet d'Ingénierie IA de bout en bout :** Recommandation culinaire, Architecture Micro-services et Déploiement Docker.
+**Smart Kitchen Planner** est un assistant culinaire intelligent nouvelle génération. Il génère des plannings de repas hebdomadaires ultra-personnalisés en respectant à la fois vos goûts (appris par IA) et vos contraintes nutritionnelles (gérées par algorithme).
 
-**SmartRetail RecSys** est un moteur intelligent de génération de menus. Contrairement aux systèmes classiques qui suggèrent des plats isolés, ce système construit des **plannings hebdomadaires cohérents** (Midi & Soir) qui respectent vos contraintes nutritionnelles (Calories) et logistiques (Temps de préparation).
-
-Le projet met l'accent sur une architecture **Clean Code**, conteneurisée avec **Docker**, et une séparation stricte entre le Data Engineering, le Backend (FastAPI) et le Frontend (Streamlit).
+Le projet a été entièrement refondu pour adopter une **architecture micro-services conteneurisée**, garantissant robustesse, scalabilité et facilité de déploiement via Docker.
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Architecture Technique Détaillée
 
-Le système suit une architecture micro-services orchestrée par Docker Compose.
+### 1. Le Moteur de Recommandation Hybride
+La force du Smart Kitchen Planner réside dans son moteur "Bicéphale" qui combine le meilleur de l'IA et de la Recherche Opérationnelle :
 
-```mermaid
-graph TD
-    User((Utilisateur)) -->|Interface Web| UI[Streamlit Frontend]
-    UI -->|JSON HTTP| API[FastAPI Backend]
-    
-    subgraph "Container: App"
-        API -->|CRUD & Auth| DB_Conn[SQLAlchemy]
-        API -->|Recommandation| Engine[Content Engine (TF-IDF/Tags)]
-        API -->|Planification| Solver[Greedy Solver]
-    end
-    
-    subgraph "Container: DB"
-        DB_Conn --> DB[(PostgreSQL)]
-    end
-```
+* **A. Le Cerveau Sémantique (Vector Search)**
+    * **Technologie :** [Sentence-Transformers](https://www.sbert.net/) (modèle `all-MiniLM-L6-v2`) + [PGVector](https://github.com/pgvector/pgvector).
+    * **Fonctionnement :** Contrairement à une recherche par mots-clés classique (TF-IDF), chaque recette est convertie en un vecteur mathématique dense (embedding) de 384 dimensions. Cela permet de capturer le **sens** et le **contexte** (ex: comprendre que "Tacos" est proche de "Fajitas" même s'ils ne partagent pas les mêmes mots).
+    * **Stockage :** Les vecteurs sont stockés directement dans PostgreSQL grâce à l'extension `vector`, permettant des recherches de similarité cosinus ultra-rapides.
 
-## ✨ Fonctionnalités Clés
+* **B. Le Solver Algorithmique (Contraintes)**
+    * **Technologie :** Algorithme heuristique custom (Python pur).
+    * **Fonctionnement :** Une fois les recettes "pertinentes" identifiées par l'IA, le Solver entre en jeu pour assembler le puzzle. Il applique des contraintes strictes :
+        * **Cible Calorique :** Respect d'une fourchette (ex: 500-700 kcal/repas).
+        * **Temps de Préparation :** Filtrage dynamique selon le temps disponible.
+        * **Diversité :** Mécanisme de pénalité pour éviter de proposer deux fois le même plat ou le même type de cuisine le même jour.
 
-### 1. 🧠 Moteur de Recommandation (Content-Based)
-Analyse les tags et ingrédients des recettes pour trouver ce qui correspond au profil de l'utilisateur.
-* **Technique :** Matching de tags pondéré (Bonus/Malus) et Nettoyage NLP (Stop-words removal) pour la recherche par ingrédients.
-* **Profilage :** Construction dynamique des préférences (Tags aimés/détestés) basée sur l'historique des notes.
+### 2. Infrastructure Micro-services (Docker)
+L'application est découpée en 3 conteneurs isolés communiquant via un réseau Docker interne :
 
-### 2. 📅 Générateur de Planning (Le Solveur)
-Transformer une liste de recettes aimées en un planning valide est un problème d'optimisation.
-* **Algorithme :** Approche Greedy (Gloutonne) avec contraintes souples.
-* **Contraintes gérées :**
-    * Cible calorique (ex: 600 kcal +/- 20% par repas).
-    * Diversité (pas deux fois la même recette).
-    * Temps de préparation maximum.
-
-### 3. 🛠️ Infrastructure & Data Engineering
-* **Parsing Robuste :** Extraction des données nutritionnelles via Regex/AST pour gérer les formats CSV hétérogènes.
-* **Docker :** Environnement reproductible avec `docker-compose`.
-* **Base de données :** PostgreSQL pour la persistance des utilisateurs, recettes et interactions.
+1.  **`db` (Database Layer)**
+    * Image : `postgres:15`
+    * Extensions : `pgvector` activé au démarrage.
+    * Rôle : Stockage persistant des utilisateurs, interactions, recettes et leurs embeddings.
+2.  **`app` (Backend Layer)**
+    * Image : Python 3.12 (Slim)
+    * Framework : **FastAPI**.
+    * Rôle : Expose une API RESTful. C'est le seul composant qui communique avec la BDD et qui charge les modèles d'IA lourds en mémoire.
+3.  **`ui` (Frontend Layer)**
+    * Image : Python 3.12 (Slim)
+    * Framework : **Streamlit**.
+    * Rôle : Interface utilisateur. Elle ne possède aucune logique métier propre et se contente d'interroger l'API via HTTP.
 
 ---
 
-## 🛠️ Stack Technique
+## 🖥️ L'Application Streamlit (Frontend)
 
-* **Langage :** Python 3.12
-* **Infrastructure :** Docker, Docker Compose
-* **Backend :** FastAPI, Pydantic, SQLAlchemy
-* **Frontend :** Streamlit
-* **Database :** PostgreSQL
-* **Data Science :** Pandas, Scikit-learn (TF-IDF), Numpy
-* **Gestionnaire de paquets :** Poetry
+L'interface utilisateur a été repensée pour être modulaire et intuitive. Elle se divise en 4 espaces distincts :
 
----
-
-## 🚀 Installation & Démarrage
-
-### 1. Pré-requis
-* Docker & Docker Compose installés.
-* Le fichier de données `RAW_recipes.csv` (à placer dans `data/raw/`).
-  * [Lien Kaggle vers le dataset Food.com](https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions)
-
-### 2. Démarrage Rapide
-Tout le projet se lance en une seule commande :
-
-```bash
-docker-compose up --build
-```
-
-Cela va :
-1. Lancer le conteneur Base de données (PostgreSQL).
-2. Construire et lancer le conteneur Application (API + Frontend).
-3. Exposer les services.
-
-### 3. Initialisation des Données (Premier lancement)
-Une fois les conteneurs actifs, chargez les données dans PostgreSQL :
-
-```bash
-# Dans un nouveau terminal
-docker exec smartretail-recsys-app-1 poetry run python -m src.scripts.load_data
-```
-*Note : Ce script nettoie la donnée brute, parse les infos nutritionnelles et peuple la BDD.*
-
-### 4. Accès
-
-* **Frontend (Streamlit) :** [http://localhost:8501](http://localhost:8501)
-* **API Docs (Swagger UI) :** [http://localhost:8000/docs](http://localhost:8000/docs)
+* **🏠 Dashboard (Home) :** Le tableau de bord principal. Il affiche l'état de santé du système (connexion API), les statistiques globales de l'utilisateur (nombre de recettes notées) et sert de hub de navigation.
+* **📅 Planner (Le Générateur) :** Le cœur fonctionnel. Vous définissez vos critères (nombre de jours, calories cibles, temps max en cuisine) et lancez la génération. Le résultat affiche un planning détaillé jour par jour avec des indicateurs de compatibilité (Score Match) et des badges "Découverte".
+* **🔥 Exploration :** Un mode "Tinder for Food". L'IA vous propose des recettes que vous ne connaissez pas encore. Vous pouvez les noter ou les passer. Chaque interaction affine votre profil vectoriel en temps réel.
+* **👤 Profil :** Le centre de contrôle de vos données. C'est ici que vous définissez vos contraintes explicites ("Végétarien", "Sans Gluten", "Épicé"...) qui agiront comme des filtres durs sur les recommandations.
 
 ---
 
-## 📂 Structure du Projet
+## 📂 Structure du Projet ("Clean Architecture")
 
 ```text
-smartretail-recsys/
-├── data/raw/            # Placez RAW_recipes.csv ici
+.
 ├── src/
-│   ├── api/             # FastAPI (Routes & Schemas)
-│   ├── database/        # Modèles SQLAlchemy & Connexion
-│   ├── recommender/     # Logique métier (ContentEngine, Solver, Profiler)
-│   ├── scripts/         # Scripts ETL (load_data, pipeline)
-│   ├── ui/              # Interface Streamlit (Pages & Components)
-│   └── utils/           # Constantes & Helpers NLP
-├── docker-compose.yml   # Orchestration
-├── Dockerfile           # Image Python
-└── pyproject.toml       # Dépendances Poetry
+│   ├── api/             # API REST (FastAPI)
+│   │   ├── app.py       # Point d'entrée et routes
+│   │   └── schemas.py   # Modèles de données Pydantic
+│   ├── database/        # Couche de Persistance
+│   │   ├── models.py    # Tables SQLAlchemy (User, Recipe, Interaction)
+│   │   └── connection.py # Gestion de la session DB
+│   ├── recommender/     # Moteur IA
+│   │   ├── vectorizer.py # Génération des embeddings (Sentence-BERT)
+│   │   ├── solver.py     # Algorithme de construction de menu
+│   │   └── profile_builder.py # Création du vecteur utilisateur
+│   ├── scripts/         # Outils d'Administration (CLI)
+│   │   ├── init_db.py           # Reset total de la base
+│   │   ├── load_data.py         # Ajout incrémental
+│   │   ├── generate_embeddings.py # Calcul des vecteurs manquants
+│   │   └── seed_interactions.py   # Génération de fausses données
+│   ├── ui/              # Frontend Streamlit
+│   │   ├── Home.py      # Page d'accueil
+│   │   ├── config.py    # Configuration centralisée (URL API)
+│   │   └── pages/       # Sous-pages (Planner, Exploration, Profil)
+│   └── utils/           # Utilitaires transverses (Traductions)
+├── data/                # Dossier monté pour les CSV bruts
+├── docker-compose.yml   # Orchestration des services
+└── Dockerfile           # Définition de l'image Python unique
 ```
 
-## 👤 Auteur
+---
 
-**Cyrille ELIE** - Projet Portfolio Ingénieur IA.
+## 🚀 Installation et Démarrage
+
+Tout le projet est piloté par Docker Compose. Aucune installation locale de Python ou PostgreSQL n'est requise.
+
+### 1. Démarrage de la Stack
+```bash
+# Clonez le projet
+git clone https://github.com/cyrilleelie/smartretail-recsys
+cd smartretail-recsys
+
+# Construisez et lancez les conteneurs (mode détaché)
+docker-compose up --build -d
+
+# Vérifiez que tout tourne (3 services doivent être "Up")
+docker-compose ps
+```
+
+Accès aux interfaces :
+* **Frontend :** [http://localhost:8501](http://localhost:8501)
+* **API Docs :** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+### 2. Initialisation des Données (Obligatoire au premier lancement)
+Les scripts d'administration doivent être exécutés **à l'intérieur** du conteneur `app` pour accéder à la base de données.
+
+**Étape A : Charger les données brutes (CSV vers PostgreSQL)**
+```bash
+docker-compose exec app python src/scripts/init_db.py
+```
+
+**Étape B : Calculer les Embeddings (Vectorisation IA)**
+*Attention : Cette étape peut prendre quelques minutes selon la puissance de votre CPU.*
+```bash
+docker-compose exec app python src/scripts/generate_embeddings.py
+```
+
+**Étape C : (Optionnel) Créer un historique factice**
+Pour tester l'application avec un utilisateur ayant déjà des préférences.
+```bash
+docker-compose exec app python src/scripts/seed_interactions.py
+```
+
+---
+
+## 🛠️ Commandes Utiles
+
+* **Voir les logs du Backend (API) :**
+    ```bash
+    docker-compose logs -f app
+    ```
+* **Voir les logs du Frontend :**
+    ```bash
+    docker-compose logs -f ui
+    ```
+* **Arrêter la stack :**
+    ```bash
+    docker-compose down
+    ```
