@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 
 # ==========================================
-# PARTIE 1 : GÉNÉRATEUR DE MENUS (Existant)
+# MODÈLES POUR LE GÉNÉRATEUR DE MENUS
 # ==========================================
 class MenuRequest(BaseModel):
     user_id: int = Field(..., description="ID de l'utilisateur en base")
@@ -31,22 +31,3 @@ class FeedbackRequest(BaseModel):
     user_id: int
     recipe_id: int
     rating: int
-
-# ==========================================
-# PARTIE 2 : MOTEUR DE RECOMMANDATION (Nouveau)
-# ==========================================
-class UserRequest(BaseModel):
-    """Ce que l'utilisateur envoie pour une recherche par ingrédients"""
-    ingredients: List[str] = Field(..., description="Liste d'ingrédients (ex: ['chicken', 'rice'])")
-
-class RecipeResponse(BaseModel):
-    """Ce que l'API renvoie pour afficher une recette"""
-    id: int
-    name: str
-    minutes: int
-    tags: str 
-    ingredients: str 
-    description: Optional[str] = None
-    
-    class Config:
-        from_attributes = True # Permet de convertir directement depuis l'objet SQLAlchemy
