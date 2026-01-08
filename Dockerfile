@@ -28,6 +28,9 @@ RUN poetry config installer.max-workers 1
 # On ajoute --no-root pour ignorer l'absence du README et du code source
 RUN poetry install --no-interaction --no-ansi --no-root
 
+# On télécharge le modèle spaCy pendant la construction de l'image
+RUN poetry run python -m spacy download en_core_web_sm
+
 # Copie du code source
 COPY . .
 

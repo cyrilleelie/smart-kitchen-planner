@@ -1,98 +1,188 @@
+import ast
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Depends, Body
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, not_
-from typing import List, Optional
+from sqlalchemy import func
+from typing import List, Dict, Any
 from datetime import datetime
-from collections import Counter
+from pydantic import BaseModel
 
-# Imports internes
+# --- IMPORTS INTERNES ---
 from src.database.connection import get_db
-from src.database.init_db import init_database
 from src.database.models import User, Interaction, Recipe
 from src.recommender.profile_builder import UserProfiler
 from src.recommender.solver import MenuSolver
-
-# --- NOUVEAUX IMPORTS (Moteur de Recommandation) ---
 from src.recommender.content_engine import ContentEngine
-from src.api.schemas import UserRequest, RecipeResponse
 
-# --- LIFESPAN (Gestion du cycle de vie) ---
+# --- SCHEMAS (Pydantic) ---
+from src.api.schemas import (
+    UserRequest, RecipeResponse, 
+    MenuRequest, MenuResponse, MealItem,
+    FeedbackRequest
+)
+
+# --- NOUVEAU SCHEMA LOCAL (Pour la sauvegarde des préférences) ---
+class PreferencesRequest(BaseModel):
+    preferences: List[str]
+
+# --- LIFESPAN (Le Cerveau IA) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🌍 Démarrage de l'API Smart Retail...")
     
-    # 1. Chargement du ContentEngine (Lourd)
-    # On le stocke dans app.state pour qu'il soit accessible partout
+    # Chargement du moteur de recommandation
     try:
         app.state.recsys = ContentEngine()
     except Exception as e:
-        print(f"⚠️ Erreur chargement ContentEngine: {e}")
+        print(f"⚠️ Erreur critique chargement IA: {e}")
         app.state.recsys = None
     
     yield
     print("🛑 Arrêt de l'API...")
 
-# Initialisation de l'app avec le lifespan
-app = FastAPI(title="Smart Retail API", lifespan=lifespan)
+# Initialisation
+app = FastAPI(title="Smart Retail API", version="2.2", lifespan=lifespan)
 
-# --- Modèles Pydantic ---
-class MenuRequest(BaseModel):
-    user_id: int
-    days: int
-    target_calories: int
-    fridge_items: Optional[List[str]] = None
-
-class FeedbackRequest(BaseModel):
-    user_id: int
-    recipe_id: int
-    rating: int 
-
-# --- Constantes ---
-TAG_BLACKLIST = {
-    "main-ingredient", "low-in-something", "dietary", "occasion", "course", 
-    "preparation", "equipment", "technique", "number-of-servings", "meat", 
-    "vegetables", "fruit", "time-to-make", "easy", "beginner-cook", 
-    "inexpensive", "healthy", "healthy-2", "5-minutes-or-less", 
-    "15-minutes-or-less", "30-minutes-or-less", "60-minutes-or-less", 
-    "4-hours-or-less", "less-thans", "low-sodium", "low-cholesterol", 
-}
 
 # ==========================================
-# 🚀 ROUTE 1 : RECOMMANDATION IA (Ingrédients)
+# 1. GESTION DES PRÉFÉRENCES (NOUVEAU) ⚙️
+# ==========================================
+@app.put("/user/{user_id}/preferences")
+def update_user_preferences(user_id: int, preferences: List[str] = Body(...), db: Session = Depends(get_db)):
+    """
+    Met à jour les préférences déclarées de l'utilisateur.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
+    # Mise à jour du champ JSON dans la base de données
+    # Note: Nécessite que la colonne 'preferences' existe dans models.py
+    user.preferences = preferences 
+    
+    db.commit()
+    db.refresh(user) # Recharge l'objet depuis la DB pour confirmer
+    
+    print(f"✅ Préférences sauvegardées pour User {user_id} : {preferences}")
+    
+    return {"status": "success", "preferences": user.preferences}
+
+
+# ==========================================
+# 2. GÉNÉRATEUR DE MENUS (Optimisation) 📅
+# ==========================================
+@app.post("/generate-menu", response_model=MenuResponse)
+def generate_menu(request: MenuRequest, db: Session = Depends(get_db)):
+    # 1. Profiling
+    profiler = UserProfiler(db)
+    user_vector = profiler.get_weighted_profile(
+        request.user_id, 
+        request.preferences
+    )
+
+    # On convertit les tags du Front (ex: "Italienne") en tags de BDD (ex: "italian")
+    active_tags = profiler.get_converted_tags(request.preferences)
+    print(f"🚀 API envoie au Solveur les tags : {active_tags}")
+
+    # --- DEBUG LOGS ---
+    print(f"\n🔍 [DEBUG] User {request.user_id} Vector: {user_vector}")
+    if not user_vector:
+        print("⚠️ [WARN] Le vecteur utilisateur est VIDE ! C'est pour ça que tout est à 0.5.")
+    # ------------------
+
+    # 2. Solving Probabiliste
+    solver = MenuSolver(
+        db=db,
+        user_vector=user_vector, 
+        days=request.days,
+        target_calories=request.target_calories_min,
+        meals_per_day=request.meals_per_day
+    )
+    
+    recommended_menu = solver.solve()
+    
+    # C. Construction de la réponse
+    plan_items = []
+    total_score = 0
+    total_cals_accumulated = 0
+    
+    for item in recommended_menu:
+        # 1. Extraction des données enrichies du Solver
+        day_num = item["day"]
+        recipe_id = item["recipe_id"]
+        algo_type = item["algo_type"] # "PERF" ou "DISCO"
+        raw_score = item["score"]
+
+        recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+        if not recipe: continue
+            
+        # 2. Parsing Calories
+        cals = 0.0
+        try:
+            if recipe.nutrition_info:
+                nutr_list = ast.literal_eval(recipe.nutrition_info)
+                cals = float(nutr_list[0])
+        except: cals = 0.0
+
+        total_score += raw_score
+        total_cals_accumulated += cals
+
+        # 3. Logique Minimaliste : Tag "Découverte" uniquement
+        current_tags = []
+        if algo_type == "DISCO":
+            current_tags.append("Découverte")
+        
+        # 4. Création de l'objet réponse
+        plan_items.append(MealItem(
+            day=day_num, 
+            recipe_name=recipe.name,
+            calories=cals,
+            time=recipe.minutes,
+            match_score=round(raw_score, 2),
+            tags=current_tags 
+        ))
+
+    nb_items = len(recommended_menu)
+    avg_score = total_score / nb_items if nb_items else 0
+    avg_cals = total_cals_accumulated / nb_items if nb_items else 0
+
+    return MenuResponse(
+        status="success",
+        user=f"User {request.user_id}",
+        plan=plan_items,
+        stats={
+            "average_match_score": round(avg_score, 2),
+            "average_calories": round(avg_cals, 0)
+        }
+    )
+
+# ==========================================
+# 3. RECOMMANDATION IA (Ingrédients) 🧠
 # ==========================================
 @app.post("/recommend", response_model=List[RecipeResponse])
-def get_recommendations(request: UserRequest, db: Session = Depends(get_db)):
-    """
-    Moteur de recommandation basé sur le contenu (Ingrédients).
-    Utilise le ContentEngine chargé au démarrage.
-    """
+def get_recommendations_by_ingredients(request: UserRequest, db: Session = Depends(get_db)):
+    """Trouve des recettes basées sur une liste d'ingrédients."""
     if not hasattr(app.state, 'recsys') or app.state.recsys is None:
-        raise HTTPException(status_code=503, detail="Moteur de recommandation non chargé.")
+        raise HTTPException(status_code=503, detail="IA non chargée.")
 
-    # 1. Appel au moteur (via app.state)
     recipe_ids = app.state.recsys.recommend(request.ingredients, top_k=5)
     
     if not recipe_ids:
         return []
 
-    # 2. Récupération des infos en BDD
     recipes = db.query(Recipe).filter(Recipe.id.in_(recipe_ids)).all()
-    
-    # 3. Réordonnancement (SQL ne garantit pas l'ordre)
     recipe_map = {r.id: r for r in recipes}
     ordered_recipes = [recipe_map[rid] for rid in recipe_ids if rid in recipe_map]
     
     return ordered_recipes
 
 # ==========================================
-# 🚀 ROUTE 2 : FEEDBACK UTILISATEUR
+# 4. FEEDBACK & INTERACTIONS ⭐
 # ==========================================
 @app.post("/feedback")
 def submit_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db)):
-    """Enregistre ou met à jour la note d'un utilisateur pour une recette."""
-    # Vérifier si l'interaction existe déjà
+    """Enregistre une note utilisateur (1-5)"""
     interaction = db.query(Interaction).filter(
         Interaction.user_id == feedback.user_id,
         Interaction.recipe_id == feedback.recipe_id
@@ -100,102 +190,62 @@ def submit_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db)):
 
     if interaction:
         interaction.rating = feedback.rating
-        interaction.timestamp = datetime.utcnow()
+        interaction.date = datetime.utcnow()
     else:
         new_interaction = Interaction(
             user_id=feedback.user_id,
             recipe_id=feedback.recipe_id,
             rating=feedback.rating,
-            timestamp=datetime.utcnow()
+            date=datetime.utcnow()
         )
         db.add(new_interaction)
     
     db.commit()
-    return {"status": "success", "message": "Feedback enregistré"}
+    return {"status": "success"}
 
-# ==========================================
-# 🚀 ROUTE 3 : PROFIL UTILISATEUR
-# ==========================================
-@app.get("/user/{user_id}/profile")
-def get_user_profile(user_id: int, db: Session = Depends(get_db)):
-    """Génère le profil culinaire de l'utilisateur basé sur ses notes."""
-    profiler = UserProfiler(db)
-    profile = profiler.get_profile(user_id)
-    
-    if not profile:
-        raise HTTPException(status_code=404, detail="Utilisateur ou interactions introuvables")
-        
-    return profile
-
-# ==========================================
-# 🚀 ROUTE 4 : GÉNÉRATEUR DE MENU
-# ==========================================
-@app.post("/generate_menu")
-def generate_menu(request: MenuRequest, db: Session = Depends(get_db)):
-    profiler = UserProfiler(db)
-    user_profile = profiler.get_profile(request.user_id)
-    
-    # Instanciation du solveur
-    solver = MenuSolver(
-        db=db,
-        user_profile=user_profile,
-        days=request.days,
-        target_calories=request.target_calories
-    )
-    
-    # Génération
-    menu = solver.solve()
-    
-    # Formatage de la réponse
-    menu_response = []
-    total_cals = 0
-    
-    for day, recipe_id in enumerate(menu):
-        recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
-        score = solver.calculate_score(recipe)
-        
-        # Calcul précis des calories (si dispo)
-        try:
-            nutr = eval(recipe.nutrition) # [cal, fat, sugar...]
-            cals = nutr[0]
-        except:
-            cals = 500 # Valeur par défaut
-            
-        total_cals += cals
-        
-        menu_response.append({
-            "day": day + 1,
-            "recipe_id": recipe.id,
-            "recipe_name": recipe.name,
-            "calories": cals,
-            "match_score": score
-        })
-
-    return {
-        "menu": menu_response,
-        "meta": {
-            "total_calories": total_cals,
-            "days": request.days
-        }
-    }
-
-# ==========================================
-# 🚀 ROUTE 5 : INTERACTIONS & EXPLORATION
-# ==========================================
 @app.get("/user/{user_id}/interactions")
 def get_user_interactions(user_id: int, db: Session = Depends(get_db)):
-    """Récupère l'historique complet des notes de l'utilisateur"""
+    """Récupère l'historique complet des notes de l'utilisateur {recipe_id: note}"""
     interactions = db.query(Interaction).filter(Interaction.user_id == user_id).all()
     return {i.recipe_id: i.rating for i in interactions}
 
+@app.get("/user/{user_id}/profile")
+def get_user_profile_endpoint(user_id: int, db: Session = Depends(get_db)):
+    """
+    Récupère le profil. Si l'utilisateur n'existe pas, on le crée à la volée (Lazy Creation).
+    Cela permet au Frontend d'avoir toujours une réponse '200 OK' et d'afficher des préférences vides.
+    """
+    # 1. On cherche l'utilisateur
+    user = db.query(User).filter(User.id == user_id).first()
+    
+    # 2. S'il n'existe pas, on le crée immédiatement
+    if not user:
+        print(f"🆕 Création automatique de l'utilisateur {user_id}")
+        new_user = User(id=user_id, username=f"user_{user_id}", preferences=[])
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        user = new_user
+
+    # 3. On calcule son profil vecteur (optionnel pour l'affichage, mais utile pour le debug)
+    profiler = UserProfiler(db)
+    # On renvoie l'objet user brut pour que le front affiche les préférences cochées (JSON)
+    return {
+        "id": user.id,
+        "username": user.username,
+        "preferences": user.preferences  # C'est ça que le Front doit lire pour reset les checkbox
+    }
+
+# ==========================================
+# 5. EXPLORATION 🧭
+# ==========================================
 @app.get("/explore")
 def explore_recipes(user_id: int, limit: int = 5, db: Session = Depends(get_db)):
-    """Renvoie des recettes aléatoires que l'utilisateur n'a JAMAIS notées."""
+    """Recettes aléatoires jamais notées"""
     rated_subquery = db.query(Interaction.recipe_id).filter(
         Interaction.user_id == user_id
     )
     candidates = db.query(Recipe).filter(
         Recipe.id.notin_(rated_subquery)
     ).order_by(func.random()).limit(limit).all()
-    
     return candidates

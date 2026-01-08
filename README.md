@@ -1,168 +1,119 @@
-# 🥗 SmartRetail RecSys: AI-Powered Meal Planner
+# 🥗 SmartRetail RecSys (Dockerized)
 
-> **An End-to-End AI Engineering Project:** From Semantic Search to Constraint Optimization and MLOps.
+> **Projet d'Ingénierie IA de bout en bout :** Recommandation culinaire, Architecture Micro-services et Déploiement Docker.
 
-**SmartRetail RecSys** is an intelligent menu generation engine. Unlike standard recommenders that suggest isolated items, this system builds coherent **weekly meal plans** that respect strict nutritional and logistical constraints (Calories, Prep Time, Diversity).
+**SmartRetail RecSys** est un moteur intelligent de génération de menus. Contrairement aux systèmes classiques qui suggèrent des plats isolés, ce système construit des **plannings hebdomadaires cohérents** (Midi & Soir) qui respectent vos contraintes nutritionnelles (Calories) et logistiques (Temps de préparation).
 
-It combines **NLP (Sentence-BERT)** to understand user tastes and **Operations Research (Google OR-Tools)** to solve the scheduling puzzle.
+Le projet met l'accent sur une architecture **Clean Code**, conteneurisée avec **Docker**, et une séparation stricte entre le Data Engineering, le Backend (FastAPI) et le Frontend (Streamlit).
 
 ---
 
 ## 🏗️ Architecture
 
-The system follows a modular "Lakehouse" architecture, separating the Intelligence (AI) from the Logic (Solver) and the Service (API).
+Le système suit une architecture micro-services orchestrée par Docker Compose.
 
 ```mermaid
 graph TD
-    User((User)) -->|Preferences| API[FastAPI Backend]
+    User((Utilisateur)) -->|Interface Web| UI[Streamlit Frontend]
+    UI -->|JSON HTTP| API[FastAPI Backend]
     
-    subgraph "Core Engine"
-        DB[(SQLite DB)] -->|Raw Recipes| Vectorizer[Sentence-BERT]
-        Vectorizer -->|Embeddings| VectorDB[(Vector Store)]
-        
-        VectorDB -->|Semantic Search| Recommender[Profile Builder]
-        Recommender -->|Top 200 Candidates| Solver[OR-Tools Solver]
-        
-        Solver -->|Constraint Optimization| Plan[Weekly Menu]
+    subgraph "Container: App"
+        API -->|CRUD & Auth| DB_Conn[SQLAlchemy]
+        API -->|Recommandation| Engine[Content Engine (TF-IDF/Tags)]
+        API -->|Planification| Solver[Greedy Solver]
     end
     
-    subgraph "MLOps Pipeline"
-        Simulator[Drift Simulator] -->|Inject New Behavior| DB
-        Monitor[Health Check] -->|Detect Rating Drop| Alert
-        Alert -->|Trigger| Retrainer[Weight Decay Retraining]
+    subgraph "Container: DB"
+        DB_Conn --> DB[(PostgreSQL)]
     end
-
-    Plan --> API
-    API --> UI[Streamlit Dashboard]
 ```
 
-## ✨ Key Features
+## ✨ Fonctionnalités Clés
 
-### 1. 🧠 Semantic Recommendation (The Brain)
-Instead of matching keywords, the system uses **Sentence-Transformers (`all-MiniLM-L6-v2`)** to vectorize recipe descriptions.
-* *Benefit:* It understands that "Tofu" and "Tempeh" are semantically close, even if the words differ.
-* *Technique:* Cosine Similarity on 384-dimensional dense vectors.
+### 1. 🧠 Moteur de Recommandation (Content-Based)
+Analyse les tags et ingrédients des recettes pour trouver ce qui correspond au profil de l'utilisateur.
+* **Technique :** Matching de tags pondéré (Bonus/Malus) et Nettoyage NLP (Stop-words removal) pour la recherche par ingrédients.
+* **Profilage :** Construction dynamique des préférences (Tags aimés/détestés) basée sur l'historique des notes.
 
-### 2. 🧩 Constraint Solving (The Logic)
-Recommending high-score items is easy. Building a valid schedule is hard.
-We use **Google OR-Tools** (CP-SAT) to enforce:
-* **Hard Constraints:** Max prep time (e.g., < 30min), Calorie range (400-900 kcal).
-* **Logic Constraints:** No "Desserts" as main courses.
-* **Diversity:** Never repeat the same recipe in a week.
+### 2. 📅 Générateur de Planning (Le Solveur)
+Transformer une liste de recettes aimées en un planning valide est un problème d'optimisation.
+* **Algorithme :** Approche Greedy (Gloutonne) avec contraintes souples.
+* **Contraintes gérées :**
+    * Cible calorique (ex: 600 kcal +/- 20% par repas).
+    * Diversité (pas deux fois la même recette).
+    * Temps de préparation maximum.
 
-### 3. 🔄 MLOps & Drift Management
-A simulation of **Concept Drift** (e.g., a user becoming Vegetarian) demonstrates the system's resilience.
-* **Monitor:** Tracks rolling average satisfaction.
-* **Retrainer:** Applies a **Time-Decay** function to user embeddings, prioritizing recent interactions over historical data to pivot recommendations dynamically.
+### 3. 🛠️ Infrastructure & Data Engineering
+* **Parsing Robuste :** Extraction des données nutritionnelles via Regex/AST pour gérer les formats CSV hétérogènes.
+* **Docker :** Environnement reproductible avec `docker-compose`.
+* **Base de données :** PostgreSQL pour la persistance des utilisateurs, recettes et interactions.
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠️ Stack Technique
 
-* **Language:** Python 3.12
-* **Dependency Manager:** Poetry
-* **AI/NLP:** `sentence-transformers`, `scikit-learn`, `numpy`
-* **Optimization:** `ortools`
-* **Backend:** `fastapi`, `uvicorn`, `sqlalchemy`
-* **Frontend:** `streamlit`
-* **Database:** SQLite (SQLAlchemy ORM)
-
----
-
-## 🚀 Getting Started
-
-### 1. Installation
-```bash
-# Clone repository
-git clone https://github.com/cyrilleelie/smartretail-recsys.git
-cd smartretail-recsys
-
-# Install dependencies with Poetry
-poetry install
-```
-
-### 2. Data Setup (Crucial Step)
-Since raw data is not hosted on GitHub (file size limit), you need to download it manually:
-1.  Create the data directory:
-    ```bash
-    mkdir -p data/raw
-    ```
-2.  Download the **Food.com Recipes Dataset** (specifically `RAW_recipes.csv`) from Kaggle:
-    * [Link to Dataset](https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions)
-3.  Place the file at: `data/raw/RAW_recipes.csv`
-
-### 3. Initialization
-Once the CSV is in place, run the initialization scripts to generate the SQL Database and Vector Embeddings.
-```bash
-# 1. Ingest CSV into SQLite
-poetry run python -m src.database.init_db
-
-# 2. Simulate User History (Cold Start)
-poetry run python -m src.simulation.user_simulator
-
-# 3. Generate NLP Embeddings (this takes ~1-2 mins)
-poetry run python -m src.recommender.vectorizer
-```
-
-### 4. Running the App
-Launch the API and the Dashboard in two separate terminals.
-
-**Terminal 1 (Backend):**
-```bash
-poetry run uvicorn src.api.app:app --reload
-```
-
-**Terminal 2 (Frontend):**
-```bash
-poetry run streamlit run src/ui/dashboard.py
-```
-
-Access the dashboard at: `http://localhost:8501`
+* **Langage :** Python 3.12
+* **Infrastructure :** Docker, Docker Compose
+* **Backend :** FastAPI, Pydantic, SQLAlchemy
+* **Frontend :** Streamlit
+* **Database :** PostgreSQL
+* **Data Science :** Pandas, Scikit-learn (TF-IDF), Numpy
+* **Gestionnaire de paquets :** Poetry
 
 ---
 
-## 📉 MLOps Scenario: The "Vegetarian Shift"
+## 🚀 Installation & Démarrage
 
-This project includes a script to simulate **Concept Drift**.
+### 1. Pré-requis
+* Docker & Docker Compose installés.
+* Le fichier de données `RAW_recipes.csv` (à placer dans `data/raw/`).
+  * [Lien Kaggle vers le dataset Food.com](https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions)
 
-1.  **Run the Monitor:** Check current health.
-    ```bash
-    poetry run python -m src.mlops.monitor
-    # Output: ✅ Model is healthy.
-    ```
+### 2. Démarrage Rapide
+Tout le projet se lance en une seule commande :
 
-2.  **Simulate Drift:** Inject interactions where the user rejects meat and likes vegetables.
-    ```bash
-    poetry run python -m src.mlops.drift_simulator
-    # Output: 🚨 20 new interactions injected (User became vegetarian).
-    ```
+```bash
+docker-compose up --build
+```
 
-3.  **Detect & Repair:** Run the retraining pipeline.
-    ```bash
-    poetry run python -m src.mlops.retrain
-    # Output: ✅ Profile successfully pivoted. New recommendations: "Carrot Salad", "Tofu Stir-fry".
-    ```
+Cela va :
+1. Lancer le conteneur Base de données (PostgreSQL).
+2. Construire et lancer le conteneur Application (API + Frontend).
+3. Exposer les services.
+
+### 3. Initialisation des Données (Premier lancement)
+Une fois les conteneurs actifs, chargez les données dans PostgreSQL :
+
+```bash
+# Dans un nouveau terminal
+docker exec smartretail-recsys-app-1 poetry run python -m src.scripts.load_data
+```
+*Note : Ce script nettoie la donnée brute, parse les infos nutritionnelles et peuple la BDD.*
+
+### 4. Accès
+
+* **Frontend (Streamlit) :** [http://localhost:8501](http://localhost:8501)
+* **API Docs (Swagger UI) :** [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
-## 📂 Project Structure
+## 📂 Structure du Projet
 
 ```text
 smartretail-recsys/
+├── data/raw/            # Placez RAW_recipes.csv ici
 ├── src/
-│   ├── api/             # FastAPI endpoints & Pydantic schemas
-│   ├── database/        # SQL Models & Data Init
-│   ├── mlops/           # Drift Simulation & Retraining Logic
-│   ├── optimization/    # OR-Tools Solver (The Constraints Engine)
-│   ├── recommender/     # Sentence-BERT Vectorizer & Profiler
-│   ├── simulation/      # User interaction generator
-│   ├── ui/              # Streamlit Dashboard
-│   └── main.py          # CLI entry point
-├── poetry.lock
-├── pyproject.toml
-└── README.md
+│   ├── api/             # FastAPI (Routes & Schemas)
+│   ├── database/        # Modèles SQLAlchemy & Connexion
+│   ├── recommender/     # Logique métier (ContentEngine, Solver, Profiler)
+│   ├── scripts/         # Scripts ETL (load_data, pipeline)
+│   ├── ui/              # Interface Streamlit (Pages & Components)
+│   └── utils/           # Constantes & Helpers NLP
+├── docker-compose.yml   # Orchestration
+├── Dockerfile           # Image Python
+└── pyproject.toml       # Dépendances Poetry
 ```
 
-## 👤 Author
+## 👤 Auteur
 
-**Cyrille ELIE** - AI Engineer Portfolio Project.
+**Cyrille ELIE** - Projet Portfolio Ingénieur IA.
