@@ -1,50 +1,28 @@
 [project]
-name = "smartretail-recsys"
+name = "smartretail"
 version = "0.1.0"
-description = "Moteur de recommandation et planification de menus"
+description = ""
 authors = [
-    {name = "Cyrille ELIE", email = "cyrille.elie@gmail.com"}
+    {name = "Cyrille ELIE",email = "cyrille.elie@gmail.com"}
 ]
 readme = "README.md"
-requires-python = "^3.12"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "numpy (>=2.4.0,<3.0.0)",
+    "pandas (>=2.3.3,<3.0.0)",
+    "fastapi (>=0.128.0,<0.129.0)",
+    "uvicorn (>=0.40.0,<0.41.0)",
+    "requests (>=2.32.5,<3.0.0)",
+    "sentence-transformers (>=5.2.0,<6.0.0)",
+    "spacy (>=3.8.11,<4.0.0)",
+    "ortools (>=9.14.6206,<10.0.0)",
+    "sqlalchemy (>=2.0.45,<3.0.0)",
+    "psycopg2-binary (>=2.9.11,<3.0.0)",
+    "streamlit (>=1.52.2,<2.0.0)",
+    "dotenv (>=0.9.9,<0.10.0)"
+]
+
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
-
-# --- DÉPENDANCES ---
-# Nous utilisons le format [tool.poetry.dependencies] pour pouvoir spécifier
-# la "source" pour Torch (indispensable pour éviter le téléchargement NVIDIA).
-
-[tool.poetry.dependencies]
-python = ">=3.12,<3.15"
-pandas = "^2.2.0"
-numpy = "^1.26.0"  # Numpy 2.x peut causer des conflits avec certaines libs, 1.26 est plus sûr pour l'instant
-sqlalchemy = "^2.0.0"
-ortools = "^9.10.0"
-fastapi = "^0.110.0"
-uvicorn = "^0.29.0"
-streamlit = "^1.32.0"
-requests = "^2.31.0"
-psycopg2-binary = "^2.9.9"
-
-# C'est ICI que la magie opère pour Docker :
-# On force l'installation de PyTorch version CPU (léger) depuis la source définie plus bas.
-torch = { version = "^2.2.0", source = "pytorch-cpu" }
-torchvision = { version = "^0.17.0", source = "pytorch-cpu" } 
-
-# Correction: sentence-transformers est en version 3.x max actuellement
-sentence-transformers = "^3.0.0"
-scikit-learn = "^1.8.0"
-spacy = "^3.8.11"
-joblib = "^1.5.3"
-
-[tool.poetry.group.dev.dependencies]
-ipykernel = "^6.29.0"
-pytest = "^8.0.0"
-
-# --- DÉFINITION DE LA SOURCE CPU ---
-[[tool.poetry.source]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-priority = "explicit"

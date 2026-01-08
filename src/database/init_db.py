@@ -1,94 +1,88 @@
 import pandas as pd
 import ast
-import re
 import os
 import sys
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+from dotenv import load_dotenv
 
-# Hack pour trouver les modules src si exécuté en script
+load_dotenv()
 sys.path.append(os.getcwd())
 
-from sqlalchemy.orm import Session
 from src.database.models import Base, Recipe, User
 from src.database.connection import engine
-from src.recommender.cleaner import TagCleaner # <--- On importe le nettoyeur
 
-def clean_text(text):
-    if not isinstance(text, str): return str(text)
-    return re.sub(r'[\r\n]+', ' ', text).strip()
+# CONFIGURATION
+INITIAL_LIMIT = 5000 
+CSV_PATHS = ["data/raw/RAW_recipes.csv", "/app/data/raw/RAW_recipes.csv", "data/RAW_recipes.csv"]
+
+def get_csv_path():
+    for path in CSV_PATHS:
+        if os.path.exists(path): return path
+    return None
 
 def init_database():
-    print("🔧 INITIALISATION & NETTOYAGE AUTO...")
+    print(f"🔥 --- INITIALISATION DIVERSIFIÉE ({INITIAL_LIMIT} recettes) ---")
+    
+    # 1. RESET
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    
+    csv_path = get_csv_path()
+    if not csv_path: return
+
+    print(f"📖 Lecture et Mélange du CSV complet...")
+    # On lit TOUT pour pouvoir bien mélanger (230k lignes ~ 100Mo RAM, c'est ok)
+    df = pd.read_csv(csv_path)
+    
+    # --- LE SHUFFLE MAGIQUE ---
+    # frac=1 signifie "prendre 100% des données" mais dans le désordre
+    # random_state=42 assure que tu auras toujours le même "set aléatoire" (reproductibilité)
+    df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+    
+    # On ne garde que les X premiers APRÈS mélange
+    df_subset = df.head(INITIAL_LIMIT)
 
     with Session(engine) as session:
-        # 1. Vérification existant
-        if session.query(Recipe).count() > 0:
-            print("   ✅ La base contient déjà des données. On ne touche à rien.")
-            return
-
-        print("   🌱 Base vide -> Chargement et Nettoyage du Dataset...")
+        print(f"📥 Insertion de {len(df_subset)} recettes variées...")
+        recipes_buffer = []
         
-        # 2. Localisation CSV
-        possible_paths = [
-            "/app/data/RAW_recipes.csv", "/app/data/raw/RAW_recipes.csv",
-            "data/RAW_recipes.csv", "data/raw/RAW_recipes.csv"
-        ]
-        csv_path = next((p for p in possible_paths if os.path.exists(p)), None)
-        
-        if not csv_path:
-            print("   ❌ ERREUR : CSV introuvable.")
-            return
+        for _, row in df_subset.iterrows():
+            try:
+                nutrition = ast.literal_eval(row['nutrition'])
+                cal = float(nutrition[0])
+            except: cal = 0.0
 
-        # 3. Chargement & Nettoyage à la volée
+            recipe = Recipe(
+                id=int(row['id']), # ID original conservé
+                name=str(row['name']),
+                minutes=int(row['minutes']),
+                tags=row['tags'] if isinstance(row['tags'], str) else "[]",
+                nutrition_info=str(row['nutrition']),
+                calories=cal,
+                description=str(row['description'])[:500] if pd.notna(row['description']) else "",
+                ingredients=row['ingredients'] if isinstance(row['ingredients'], str) else "[]",
+                n_steps=int(row['n_steps']),
+                steps=str(row['steps'])
+            )
+            recipes_buffer.append(recipe)
+        
+        session.add_all(recipes_buffer)
+        session.commit()
+        
+        # Mise à jour de la séquence pour éviter les conflits futurs
         try:
-            chunk_size = 5000; limit = 5000; count = 0
-            # On charge tout pour avoir les infos, mais on nettoie les tags
-            dtype_dict = {'name': str, 'tags': str, 'description': str, 'minutes': int}
-            
-            for chunk in pd.read_csv(csv_path, chunksize=chunk_size, dtype=dtype_dict):
-                recipes_buffer = []
-                for _, row in chunk.iterrows():
-                    try: cal = float(ast.literal_eval(row['nutrition'])[0])
-                    except: cal = 0.0
-                    
-                    ing = row['ingredients'] if isinstance(row['ingredients'], str) else "[]"
-                    
-                    # --- NETTOYAGE DES TAGS ICI ---
-                    raw_tags = row['tags']
-                    try:
-                        tags_list = ast.literal_eval(raw_tags) if isinstance(raw_tags, str) else []
-                        # On ne garde que ce qui n'est pas du bruit
-                        clean_tags = [t for t in tags_list if TagCleaner.get_tag_category(t) != "NOISE"]
-                        tags_str = str(clean_tags)
-                    except:
-                        tags_str = "[]"
-                    # ------------------------------
+            max_id = int(df['id'].max()) # On prend le max global du CSV pour être large
+            session.execute(text(f"SELECT setval('recipes_id_seq', {max_id}, true)"))
+            session.commit()
+        except: pass
 
-                    recipes_buffer.append(Recipe(
-                        id=row['id'], 
-                        name=clean_text(row['name']), 
-                        minutes=int(row['minutes']),
-                        tags=tags_str, # On sauvegarde la version PROPRE
-                        calories=cal, 
-                        description=clean_text(row['description'])[:500],
-                        ingredients=ing
-                    ))
-                
-                session.add_all(recipes_buffer)
-                session.commit()
-                count += len(recipes_buffer)
-                if count >= limit: break
-                
-            print(f"   ✅ {count} recettes importées et nettoyées !")
+        print(f"   ✅ Base initialisée avec succès.")
 
-            # 4. User par défaut
-            if session.query(User).count() == 0:
-                session.add(User(id=1, username="Chef Cyril"))
-                session.commit()
-                print("   👤 Utilisateur créé.")
-
-        except Exception as e:
-            print(f"   ❌ Erreur import : {e}")
+        # User par défaut
+        user = User(username="Chef Cyril", preferences=[])
+        session.add(user)
+        session.commit()
 
 if __name__ == "__main__":
     init_database()

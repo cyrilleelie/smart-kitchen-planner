@@ -9,6 +9,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    preferences = Column(JSON, default=list)
 
     # Relation inverse (facultatif mais pratique)
     interactions = relationship("Interaction", back_populates="user")
@@ -23,6 +24,7 @@ class Recipe(Base):
     tags = Column(String)
     calories = Column(Float)
     n_steps = Column(Integer, nullable=True)
+    steps = Column(Text)
     nutrition_info = Column(JSON, nullable=True)
     ingredients = Column(Text) # Stocké comme string "['chicken', 'salt']"
     
