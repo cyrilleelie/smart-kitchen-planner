@@ -17,6 +17,14 @@ raw_recipes.csv
 *.sqlite3
 smartretail.db
 
+# Ignore les artefacts de ML
+mlruns/
+models/
+reports/
+*.pkl
+*.joblib
+*.h5
+
 # Environment variables
 .env
 

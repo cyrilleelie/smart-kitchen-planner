@@ -1,28 +1,46 @@
-[project]
+[tool.poetry]
 name = "smartretail"
 version = "0.1.0"
-description = ""
-authors = [
-    {name = "Cyrille ELIE",email = "cyrille.elie@gmail.com"}
-]
+description = "AI Powered Kitchen Assistant"
+authors = ["Cyril"]
 readme = "README.md"
-requires-python = ">=3.12,<3.15"
-dependencies = [
-    "numpy (>=2.4.0,<3.0.0)",
-    "pandas (>=2.3.3,<3.0.0)",
-    "fastapi (>=0.128.0,<0.129.0)",
-    "uvicorn (>=0.40.0,<0.41.0)",
-    "requests (>=2.32.5,<3.0.0)",
-    "sentence-transformers (>=5.2.0,<6.0.0)",
-    "spacy (>=3.8.11,<4.0.0)",
-    "ortools (>=9.14.6206,<10.0.0)",
-    "sqlalchemy (>=2.0.45,<3.0.0)",
-    "psycopg2-binary (>=2.9.11,<3.0.0)",
-    "streamlit (>=1.52.2,<2.0.0)",
-    "dotenv (>=0.9.9,<0.10.0)"
-]
 
+[tool.poetry.dependencies]
+python = "^3.12"
+
+# --- CORE APP ---
+fastapi = "^0.110.0"
+uvicorn = "^0.29.0"
+sqlalchemy = "^2.0.29"
+psycopg2-binary = "^2.9.9"
+pgvector = "^0.2.5"
+requests = "^2.31.0"
+python-multipart = "^0.0.9"
+
+# --- UI ---
+streamlit = "^1.32.0"
+
+# --- AI & MLOPS ---
+# On force Numpy < 2 pour satisfaire MLflow 2.12
+numpy = "<2.0.0"
+
+# NLP Frameworks
+sentence-transformers = "^2.6.0"
+spacy = "^3.7.4"  # <--- AJOUTÉ ICI POUR CORRIGER L'ERREUR
+
+# MLflow 2.12.1 (Version stable Docker)
+mlflow = "2.12.1"
+
+# OR-Tools 9.9 (Compatible avec le vieux Protobuf de MLflow)
+ortools = "9.9.3963"
+
+# Monitoring de drift
+evidently = "^0.4.0"
+
+# Data Science Standard
+pandas = "^2.2.0"
+scikit-learn = "^1.4.0"
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
