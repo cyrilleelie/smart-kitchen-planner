@@ -10,6 +10,9 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 import mlflow
 import mlflow.sklearn
 import ast
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configuration des chemins
 sys.path.append(os.getcwd())
@@ -196,6 +199,29 @@ def train():
                                       max_depth=params["max_depth"], 
                                       n_jobs=-1, random_state=42)
         model.fit(X_train, y_train)
+
+        # --- AJOUT MLOPS : Sauvegarde de la Reference Data ---
+        print("   💾 Sauvegarde de la Reference Data pour Evidently...")
+        
+        # On reconstitue un DataFrame propre pour le futur monitoring
+        # On sauve X_train (features) + y_train (target réelle)
+        # C'est ce que le modèle "connaît" par coeur.
+        
+        # Note: X_train est un numpy array, on le convertit en DF pour plus de clarté
+        # Idéalement, nomme tes colonnes si tu peux, sinon des indices suffisent
+        ref_df = pd.DataFrame(X_train) 
+        ref_df["target"] = y_train
+        
+        # On sauvegarde en CSV localement puis on l'envoie sur MLflow
+        ref_path = "reference_data.csv"
+        # On prend un sample si le dataset est géant (>50k lignes), sinon tout
+        ref_df.to_csv(ref_path, index=False)
+        
+        mlflow.log_artifact(ref_path, "drift_reference")
+        
+        if os.path.exists(ref_path):
+            os.remove(ref_path)
+        # ----------------------------------------------------
 
         predictions = model.predict(X_test)
         rmse = np.sqrt(mean_squared_error(y_test, predictions))

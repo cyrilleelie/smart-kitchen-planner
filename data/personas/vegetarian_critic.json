@@ -1,0 +1,21 @@
+{
+  "username": "Green_Avenger_2026",
+  "preferences": ["vegetarian", "vegan", "healthy"],
+  "interaction_count": 500,
+  "behavior_rules": {
+    "likes": {
+      "keywords": ["salad", "soup", "vegetable", "tofu", "bean", "fruit", "rice", "quinoa"],
+      "rating_dist": [4.0, 5.0],
+      "weights": [0.3, 0.7]
+    },
+    "dislikes": {
+      "keywords": ["steak", "beef", "chicken", "pork", "meat", "burger", "bacon", "sausage"],
+      "rating_dist": [1.0, 2.0],
+      "weights": [0.8, 0.2]
+    },
+    "neutral": {
+      "rating_dist": [3.0, 4.0],
+      "weights": [0.6, 0.4]
+    }
+  }
+}
