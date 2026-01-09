@@ -5,19 +5,20 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel
 
 # --- IMPORTS INTERNES ---
 from src.database.connection import get_db
 from src.database.models import User, Interaction, Recipe
 from src.recommender.profile_builder import UserProfiler
 from src.recommender.solver import MenuSolver
+from src.recommender.inference_service import recommender_service
 
 # --- SCHEMAS (Pydantic) ---
-# Note : UserRequest et RecipeResponse ont été supprimés car inutiles
 from src.api.schemas import (
     MenuRequest, MenuResponse, MealItem,
-    FeedbackRequest
+    FeedbackRequest,
+    ContextRequest, RecipeRecommendation,
+    PlanningRequest
 )
 
 # --- LIFESPAN ---
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
     print("🛑 Arrêt de l'API...")
 
 # Initialisation
-app = FastAPI(title="Smart Retail API", version="2.4-lite", lifespan=lifespan)
+app = FastAPI(title="Smart Retail API", version="2.7-batch-controller", lifespan=lifespan)
 
 
 # ==========================================
@@ -36,9 +37,7 @@ app = FastAPI(title="Smart Retail API", version="2.4-lite", lifespan=lifespan)
 # ==========================================
 @app.put("/user/{user_id}/preferences")
 def update_user_preferences(user_id: int, preferences: List[str] = Body(...), db: Session = Depends(get_db)):
-    """
-    Met à jour les préférences déclarées de l'utilisateur.
-    """
+    """Met à jour les préférences déclarées de l'utilisateur."""
     user = db.query(User).filter(User.id == user_id).first()
     
     if not user:
@@ -52,7 +51,7 @@ def update_user_preferences(user_id: int, preferences: List[str] = Body(...), db
 
 
 # ==========================================
-# 2. GÉNÉRATEUR DE MENUS (Core Feature)
+# 2. GÉNÉRATEUR DE MENUS (Legacy Solver)
 # ==========================================
 @app.post("/generate-menu", response_model=MenuResponse)
 def generate_menu(request: MenuRequest, db: Session = Depends(get_db)):
@@ -190,3 +189,158 @@ def explore_recipes(user_id: int, limit: int = 5, db: Session = Depends(get_db))
         Recipe.id.notin_(rated_subquery)
     ).order_by(func.random()).limit(limit).all()
     return candidates
+
+# ==========================================
+# 5. RECOMMANDATION CONTEXTUELLE (AI POWERED)
+# ==========================================
+@app.post("/recommend", response_model=List[RecipeRecommendation])
+def get_contextual_recommendations(request: ContextRequest, db: Session = Depends(get_db)):
+    """
+    Recommande 5 recettes basées sur le profil vectoriel et le contexte (Heure/Saison).
+    """
+    user = db.query(User).filter(User.id == request.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
+    recommendations = recommender_service.recommend(
+        user_id=request.user_id,
+        meal_type=request.meal_type,
+        season=request.season,
+        session=db,
+        top_k=5
+    )
+    
+    response = []
+    for item in recommendations:
+        recipe = item["recipe"]
+        cals = 0.0
+        try:
+            if recipe.nutrition_info:
+                nutr_list = ast.literal_eval(recipe.nutrition_info)
+                cals = float(nutr_list[0])
+        except: pass
+
+        response.append(RecipeRecommendation(
+            id=recipe.id,
+            name=recipe.name,
+            minutes=recipe.minutes,
+            score=round(item["score"], 2),
+            calories=cals
+        ))
+        
+    return response
+
+# ==========================================
+# 6. PLANIFICATEUR CONTEXTUEL (BATCH & SPLIT)
+# ==========================================
+@app.post("/generate-planning", response_model=MenuResponse)
+def generate_planning_batch(request: PlanningRequest, db: Session = Depends(get_db)):
+    """
+    Génère un planning en appelant recommend_weekly_batch.
+    Implémente le 'Batch & Split' pour éviter les doublons Midi/Soir.
+    """
+    selected_set = set(request.selected_meals)
+    
+    # Structure temporaire pour stocker les résultats par jour
+    # daily_menus[jour] = {type_repas_id: item_data, ...}
+    daily_menus = {d: {} for d in range(1, request.days + 1)}
+
+    # --- A. GESTION DES REPAS PRINCIPAUX (MIDI & SOIR) ---
+    # Si on demande MIDI (1) ET SOIR (2), on utilise la stratégie 'Batch & Split'
+    if 1 in selected_set and 2 in selected_set:
+        # On génère 2x recettes d'un coup avec le contexte 'Déjeuner' (1)
+        # On suppose que Déjeuner/Dîner sont interchangeables pour le modèle principal
+        main_meals = recommender_service.recommend_weekly_batch(
+            user_id=request.user_id,
+            meal_type=1, # On utilise 1 (Midi) comme contexte générique "Plat"
+            season=request.season,
+            session=db,
+            n_days=request.days * 2, # Double dose
+            target_calories=request.target_calories
+        )
+        
+        # Split : Première moitié pour midi, seconde pour le soir
+        lunches = main_meals[:request.days]
+        dinners = main_meals[request.days:]
+        
+        for i in range(request.days):
+            if i < len(lunches): daily_menus[i+1][1] = lunches[i]
+            if i < len(dinners): daily_menus[i+1][2] = dinners[i]
+            
+        # On marque comme traités pour ne pas les refaire individuellement
+        processed_meals = {1, 2}
+    else:
+        processed_meals = set()
+
+    # --- B. GESTION DES AUTRES REPAS (PETIT DEJ, SNACK, OU ISOLES) ---
+    for m_id in selected_set:
+        if m_id in processed_meals:
+            continue
+            
+        # Appel standard pour 1 type de repas
+        meals = recommender_service.recommend_weekly_batch(
+            user_id=request.user_id,
+            meal_type=m_id, # C'est ici qu'on passe le meal_type requis !
+            season=request.season,
+            session=db,
+            n_days=request.days,
+            target_calories=request.target_calories
+        )
+        
+        for i in range(request.days):
+            if i < len(meals):
+                daily_menus[i+1][m_id] = meals[i]
+
+    # --- C. FORMATAGE DE LA RÉPONSE ---
+    plan_items = []
+    total_score = 0
+    total_calories = 0
+    items_count = 0
+
+    for day_num, meals_dict in daily_menus.items():
+        for m_id, item_data in meals_dict.items():
+            
+            recipe = item_data["recipe"]
+            score = item_data["score"]
+            tag = item_data["tag"]
+
+            # Parsing sécurisé
+            cals = 0.0
+            ing_list = []
+            rec_tags = []
+            try:
+                if recipe.nutrition_info:
+                    cals = float(ast.literal_eval(recipe.nutrition_info)[0])
+                if recipe.ingredients:
+                    ing_list = ast.literal_eval(recipe.ingredients)
+                if recipe.tags:
+                    rec_tags = ast.literal_eval(recipe.tags)
+            except: pass
+
+            total_score += score
+            total_calories += cals
+            items_count += 1
+
+            plan_items.append(MealItem(
+                day=day_num,
+                recipe_name=recipe.name,
+                calories=cals,
+                time=recipe.minutes,
+                match_score=round(score, 2),
+                tags=[tag] if tag == "Découverte" else [],
+                ingredients=ing_list,
+                recipe_tags=rec_tags
+            ))
+
+    avg_score = total_score / items_count if items_count else 0
+    avg_cals = total_calories / items_count if items_count else 0
+
+    return MenuResponse(
+        status="success",
+        user=f"User {request.user_id}",
+        plan=plan_items,
+        stats={
+            "average_match_score": round(avg_score, 2),
+            "average_calories": round(avg_cals, 0)
+        }
+    )
