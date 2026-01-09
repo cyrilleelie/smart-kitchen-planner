@@ -25,12 +25,24 @@ services:
       - "8000:8000"
       - "8501:8501"
     volumes:
+      - .:/app
       - ./src:/app/src
       - ./data:/app/data
       - ./pyproject.toml:/app/pyproject.toml
       - ./poetry.lock:/app/poetry.lock
+      - ./mlruns:/mlflow
     # Lancement simultané API + Streamlit
     command: sh -c "uvicorn src.api.app:app --host 0.0.0.0 --port 8000 & streamlit run src/ui/Home.py --server.port 8501 --server.address 0.0.0.0"
+
+  # Service MLflow
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.12.1  # <--- Version stable fixée
+    container_name: smartretail-mlflow
+    ports:
+      - "5000:5000"
+    command: mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root /mlflow/artifacts --host 0.0.0.0
+    volumes:
+      - ./mlruns:/mlflow
 
 volumes:
   postgres_data:

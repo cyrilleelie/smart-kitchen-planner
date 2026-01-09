@@ -1,6 +1,9 @@
 # Image de base légère
 FROM python:3.12-slim
 
+# Ajout de git pour le tracking MLflow
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
 # Dossier de travail
 WORKDIR /app
 
