@@ -14,7 +14,7 @@ from src.database.connection import engine
 
 # CONFIGURATION
 BATCH_ADD = 1000
-CSV_PATHS = ["data/raw/RAW_recipes.csv", "/app/data/raw/RAW_recipes.csv", "data/RAW_recipes.csv"]
+CSV_PATHS = ["data/raw/RAW_recipes.csv"]
 
 def get_csv_path():
     for path in CSV_PATHS:

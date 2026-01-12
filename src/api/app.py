@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Depends, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone # <--- AJOUT IMPORTANT
 
 # --- IMPORTS INTERNES ---
 from src.database.connection import get_db
@@ -137,15 +137,18 @@ def submit_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db)):
         Interaction.recipe_id == feedback.recipe_id
     ).first()
 
+    # CORRECTION : Utilisation de timezone-aware datetime
+    now_utc = datetime.now(timezone.utc)
+
     if interaction:
         interaction.rating = feedback.rating
-        interaction.date = datetime.utcnow()
+        interaction.date = now_utc
     else:
         new_interaction = Interaction(
             user_id=feedback.user_id,
             recipe_id=feedback.recipe_id,
             rating=feedback.rating,
-            date=datetime.utcnow()
+            date=now_utc
         )
         db.add(new_interaction)
     

@@ -40,7 +40,11 @@ services:
     container_name: smartretail-mlflow
     ports:
       - "5000:5000"
-    command: mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root /mlflow/artifacts --host 0.0.0.0
+    command: >
+      mlflow server
+      --backend-store-uri file:///mlflow
+      --host 0.0.0.0
+      --serve-artifacts
     volumes:
       - ./mlruns:/mlflow
 
