@@ -1,15 +1,14 @@
-import ast
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Body, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Dict, Any
+from typing import List
 from datetime import datetime, timezone
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi.middleware.cors import CORSMiddleware
-import os # <--- AJOUT IMPORTANT
+import os  # <--- AJOUT IMPORTANT
 
 # --- IMPORTS INTERNES ---
 from src.database.connection import get_db
@@ -22,16 +21,21 @@ import logging
 from src.utils.logging_config import setup_logging
 
 # Setup logging
+# --- SCHEMAS (Pydantic) ---
+from src.api.schemas import (
+    MenuRequest,
+    MenuResponse,
+    MealItem,
+    FeedbackRequest,
+    ContextRequest,
+    RecipeRecommendation,
+    PlanningRequest,
+)
+
+# Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# --- SCHEMAS (Pydantic) ---
-from src.api.schemas import (
-    MenuRequest, MenuResponse, MealItem,
-    FeedbackRequest,
-    ContextRequest, RecipeRecommendation,
-    PlanningRequest
-)
 
 # --- LIFESPAN ---
 @asynccontextmanager
@@ -40,10 +44,13 @@ async def lifespan(app: FastAPI):
     yield
     print("🛑 Arrêt de l'API...")
 
+
 # Initialisation
 # Initialisation
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="Smart Retail API", version="2.8-batch-controller", lifespan=lifespan)
+app = FastAPI(
+    title="Smart Retail API", version="2.8-batch-controller", lifespan=lifespan
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -62,17 +69,19 @@ app.add_middleware(
 # 1. GESTION DES PRÉFÉRENCES
 # ==========================================
 @app.put("/user/{user_id}/preferences")
-def update_user_preferences(user_id: int, preferences: List[str] = Body(...), db: Session = Depends(get_db)):
+def update_user_preferences(
+    user_id: int, preferences: List[str] = Body(...), db: Session = Depends(get_db)
+):
     """Met à jour les préférences déclarées de l'utilisateur."""
     user = db.query(User).filter(User.id == user_id).first()
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
 
-    user.preferences = preferences 
+    user.preferences = preferences
     db.commit()
     db.refresh(user)
-    
+
     return {"status": "success", "preferences": user.preferences}
 
 
@@ -81,55 +90,57 @@ def update_user_preferences(user_id: int, preferences: List[str] = Body(...), db
 # ==========================================
 @app.post("/generate-menu", response_model=MenuResponse)
 @limiter.limit("10/minute")
-def generate_menu(request: Request, menu_request: MenuRequest = Body(...), db: Session = Depends(get_db)):
+def generate_menu(
+    request: Request,
+    menu_request: MenuRequest = Body(...),
+    db: Session = Depends(get_db),
+):
     """
     Generate a weekly menu plan using the heuristic solver.
-    
+
     Args:
         request: Raw request (for rate limiting)
         menu_request: Menu generation parameters (user_id, days, calories)
         db: Database session
-        
+
     Returns:
         MenuResponse: The generated menu with recipes for each day.
-        
+
     Raises:
         HTTPException(404): If user is not found.
     """
     # Note: nous avons renommé 'request' -> 'menu_request' pour Pydantic, car 'request' est pris par limiter
-    request = menu_request # Alias pour garder la compatibilité du code existant
+    request = menu_request  # Alias pour garder la compatibilité du code existant
     # A. Profiling
     profiler = UserProfiler(db)
-    user_vector = profiler.get_weighted_profile(
-        request.user_id, 
-        request.preferences
-    )
+    user_vector = profiler.get_weighted_profile(request.user_id, request.preferences)
 
     # B. Solving
     solver = MenuSolver(
         db=db,
-        user_vector=user_vector, 
+        user_vector=user_vector,
         days=request.days,
         target_calories=request.target_calories_min,
-        meals_per_day=request.meals_per_day
+        meals_per_day=request.meals_per_day,
     )
-    
+
     recommended_menu = solver.solve()
-    
+
     # C. Construction de la réponse
     plan_items = []
     total_score = 0
     total_cals_accumulated = 0
-    
+
     for item in recommended_menu:
         day_num = item["day"]
         recipe_id = item["recipe_id"]
-        algo_type = item["algo_type"] # "PERF", "DISCO", "RESCUE"
+        algo_type = item["algo_type"]  # "PERF", "DISCO", "RESCUE"
         raw_score = item["score"]
 
         recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
-        if not recipe: continue
-            
+        if not recipe:
+            continue
+
         # Parsing Calories
         cals = 0.0
         try:
@@ -138,9 +149,13 @@ def generate_menu(request: Request, menu_request: MenuRequest = Body(...), db: S
                 if isinstance(nutr_list, list) and len(nutr_list) > 0:
                     cals = float(nutr_list[0])
                 else:
-                    logger.warning(f"Invalid nutrition_info format for recipe {recipe.id}")
+                    logger.warning(
+                        f"Invalid nutrition_info format for recipe {recipe.id}"
+                    )
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            logger.warning(f"Failed to parse nutrition_info for recipe {recipe.id}: {e}")
+            logger.warning(
+                f"Failed to parse nutrition_info for recipe {recipe.id}: {e}"
+            )
             cals = 0.0
 
         total_score += raw_score
@@ -150,15 +165,17 @@ def generate_menu(request: Request, menu_request: MenuRequest = Body(...), db: S
         current_tags = []
         if algo_type == "DISCO":
             current_tags.append("Découverte")
-        
-        plan_items.append(MealItem(
-            day=day_num, 
-            recipe_name=recipe.name,
-            calories=cals,
-            time=recipe.minutes,
-            match_score=round(raw_score, 2),
-            tags=current_tags 
-        ))
+
+        plan_items.append(
+            MealItem(
+                day=day_num,
+                recipe_name=recipe.name,
+                calories=cals,
+                time=recipe.minutes,
+                match_score=round(raw_score, 2),
+                tags=current_tags,
+            )
+        )
 
     nb_items = len(recommended_menu)
     avg_score = total_score / nb_items if nb_items else 0
@@ -170,9 +187,10 @@ def generate_menu(request: Request, menu_request: MenuRequest = Body(...), db: S
         plan=plan_items,
         stats={
             "average_match_score": round(avg_score, 2),
-            "average_calories": round(avg_cals, 0)
-        }
+            "average_calories": round(avg_cals, 0),
+        },
     )
+
 
 # ==========================================
 # 3. FEEDBACK & INTERACTIONS
@@ -180,10 +198,14 @@ def generate_menu(request: Request, menu_request: MenuRequest = Body(...), db: S
 @app.post("/feedback")
 def submit_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db)):
     """Enregistre une note utilisateur (1-5)"""
-    interaction = db.query(Interaction).filter(
-        Interaction.user_id == feedback.user_id,
-        Interaction.recipe_id == feedback.recipe_id
-    ).first()
+    interaction = (
+        db.query(Interaction)
+        .filter(
+            Interaction.user_id == feedback.user_id,
+            Interaction.recipe_id == feedback.recipe_id,
+        )
+        .first()
+    )
 
     # CORRECTION : Utilisation de timezone-aware datetime
     now_utc = datetime.now(timezone.utc)
@@ -196,12 +218,13 @@ def submit_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db)):
             user_id=feedback.user_id,
             recipe_id=feedback.recipe_id,
             rating=feedback.rating,
-            date=now_utc
+            date=now_utc,
         )
         db.add(new_interaction)
-    
+
     db.commit()
     return {"status": "success"}
+
 
 @app.get("/user/{user_id}/interactions")
 def get_user_interactions(user_id: int, db: Session = Depends(get_db)):
@@ -209,11 +232,12 @@ def get_user_interactions(user_id: int, db: Session = Depends(get_db)):
     interactions = db.query(Interaction).filter(Interaction.user_id == user_id).all()
     return {i.recipe_id: i.rating for i in interactions}
 
+
 @app.get("/user/{user_id}/profile")
 def get_user_profile_endpoint(user_id: int, db: Session = Depends(get_db)):
     """Récupère ou crée le profil utilisateur"""
     user = db.query(User).filter(User.id == user_id).first()
-    
+
     if not user:
         new_user = User(id=user_id, username=f"user_{user_id}", preferences=[])
         db.add(new_user)
@@ -221,11 +245,8 @@ def get_user_profile_endpoint(user_id: int, db: Session = Depends(get_db)):
         db.refresh(new_user)
         user = new_user
 
-    return {
-        "id": user.id,
-        "username": user.username,
-        "preferences": user.preferences
-    }
+    return {"id": user.id, "username": user.username, "preferences": user.preferences}
+
 
 # ==========================================
 # 4. EXPLORATION
@@ -236,47 +257,53 @@ def explore_recipes(user_id: int, limit: int = 5, db: Session = Depends(get_db))
     rated_subquery = db.query(Interaction.recipe_id).filter(
         Interaction.user_id == user_id
     )
-    candidates = db.query(Recipe).filter(
-        Recipe.id.notin_(rated_subquery)
-    ).order_by(func.random()).limit(limit).all()
+    candidates = (
+        db.query(Recipe)
+        .filter(Recipe.id.notin_(rated_subquery))
+        .order_by(func.random())
+        .limit(limit)
+        .all()
+    )
     return candidates
+
 
 # ==========================================
 # 5. RECOMMANDATION CONTEXTUELLE (AI POWERED)
 # ==========================================
 @app.post("/recommend", response_model=List[RecipeRecommendation])
 @limiter.limit("30/minute")
-def get_contextual_recommendations(request: Request, context_request: ContextRequest = Body(...), db: Session = Depends(get_db)):
+def get_contextual_recommendations(
+    request: Request,
+    context_request: ContextRequest = Body(...),
+    db: Session = Depends(get_db),
+):
     """
     Get 5 contextual recipe recommendations based on AI model.
-    
+
     Uses Random Forest model to predict recipe relevance based on:
     - User profile (embeddings)
     - Recipe features (embeddings)
     - Context (Time of day, Season)
-    
+
     Args:
         request: Raw request
         context_request: User ID and optional manual context overrides
         db: Database session
-        
+
     Returns:
         List[RecipeRecommendation]: Top 5 recommended recipes.
     """
-    request = context_request # Alias
+    request = context_request  # Alias
     user = db.query(User).filter(User.id == request.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
 
     # Instantiation du service avec la session DB
     service = InferenceService(db)
-    
+
     # Appel du service MLflow
-    recommendations = service.recommend(
-        user_id=request.user_id,
-        n=5
-    )
-    
+    recommendations = service.recommend(user_id=request.user_id, n=5)
+
     response = []
     for item in recommendations:
         recipe = item["recipe"]
@@ -289,15 +316,18 @@ def get_contextual_recommendations(request: Request, context_request: ContextReq
             logger.warning(f"Failed to parse nutrition_info in recommendation: {e}")
             pass
 
-        response.append(RecipeRecommendation(
-            id=recipe.id,
-            name=recipe.name,
-            minutes=recipe.minutes,
-            score=round(item["score"], 2),
-            calories=cals
-        ))
-        
+        response.append(
+            RecipeRecommendation(
+                id=recipe.id,
+                name=recipe.name,
+                minutes=recipe.minutes,
+                score=round(item["score"], 2),
+                calories=cals,
+            )
+        )
+
     return response
+
 
 # ==========================================
 # 6. PLANIFICATEUR CONTEXTUEL (BATCH & SPLIT)
@@ -309,11 +339,11 @@ def generate_planning_batch(request: PlanningRequest, db: Session = Depends(get_
     Implémente le 'Batch & Split' pour éviter les doublons Midi/Soir.
     """
     selected_set = set(request.selected_meals)
-    
+
     # Structure temporaire pour stocker les résultats par jour
     # daily_menus[jour] = {type_repas_id: item_data, ...}
     daily_menus = {d: {} for d in range(1, request.days + 1)}
-    
+
     # Instantiation du service
     service = InferenceService(db)
 
@@ -324,21 +354,23 @@ def generate_planning_batch(request: PlanningRequest, db: Session = Depends(get_
         # On suppose que Déjeuner/Dîner sont interchangeables pour le modèle principal
         main_meals = service.recommend_weekly_batch(
             user_id=request.user_id,
-            meal_type=1, # On utilise 1 (Midi) comme contexte générique "Plat"
+            meal_type=1,  # On utilise 1 (Midi) comme contexte générique "Plat"
             season=request.season,
             session=db,
-            n_days=request.days * 2, # Double dose
-            target_calories=request.target_calories
+            n_days=request.days * 2,  # Double dose
+            target_calories=request.target_calories,
         )
-        
+
         # Split : Première moitié pour midi, seconde pour le soir
-        lunches = main_meals[:request.days]
-        dinners = main_meals[request.days:]
-        
+        lunches = main_meals[: request.days]
+        dinners = main_meals[request.days :]
+
         for i in range(request.days):
-            if i < len(lunches): daily_menus[i+1][1] = lunches[i]
-            if i < len(dinners): daily_menus[i+1][2] = dinners[i]
-            
+            if i < len(lunches):
+                daily_menus[i + 1][1] = lunches[i]
+            if i < len(dinners):
+                daily_menus[i + 1][2] = dinners[i]
+
         # On marque comme traités pour ne pas les refaire individuellement
         processed_meals = {1, 2}
     else:
@@ -348,20 +380,20 @@ def generate_planning_batch(request: PlanningRequest, db: Session = Depends(get_
     for m_id in selected_set:
         if m_id in processed_meals:
             continue
-            
+
         # Appel standard pour 1 type de repas
         meals = service.recommend_weekly_batch(
             user_id=request.user_id,
-            meal_type=m_id, # C'est ici qu'on passe le meal_type requis !
+            meal_type=m_id,  # C'est ici qu'on passe le meal_type requis !
             season=request.season,
             session=db,
             n_days=request.days,
-            target_calories=request.target_calories
+            target_calories=request.target_calories,
         )
-        
+
         for i in range(request.days):
             if i < len(meals):
-                daily_menus[i+1][m_id] = meals[i]
+                daily_menus[i + 1][m_id] = meals[i]
 
     # --- C. FORMATAGE DE LA RÉPONSE ---
     plan_items = []
@@ -371,7 +403,7 @@ def generate_planning_batch(request: PlanningRequest, db: Session = Depends(get_
 
     for day_num, meals_dict in daily_menus.items():
         for m_id, item_data in meals_dict.items():
-            
+
             recipe = item_data["recipe"]
             score = item_data["score"]
             tag = item_data["tag"]
@@ -384,43 +416,50 @@ def generate_planning_batch(request: PlanningRequest, db: Session = Depends(get_
                 if recipe.nutrition_info:
                     try:
                         cals = float(json.loads(recipe.nutrition_info)[0])
-                    except: pass
+                    except Exception:
+                        pass
                 if recipe.ingredients:
                     try:
-                        ing_list = json.loads(recipe.ingredients) # ast.literal_eval -> json.loads
+                        ing_list = json.loads(
+                            recipe.ingredients
+                        )  # ast.literal_eval -> json.loads
                         # Note: ingredients are often stored simply as text representations of lists in Python str format in some datasets
-                        # If json.loads fails, we might need a fallback or data cleaning. 
+                        # If json.loads fails, we might need a fallback or data cleaning.
                         # For this specific case, if the data is Python list string, json.loads might fail if it uses single quotes.
                         # Let's check if we can make it safer. The original code used ast.literal_eval.
                         # Ideally data should be stored as JSON. For now assuming JSON or valid string.
-                        pass 
-                    except: 
-                         # Fallback for legacy format if json fails but ast works (transition period)
-                         # BUT user asked to replace ast.literal_eval. 
-                         # If the DB has single quotes, json.loads WILL fail.
-                         # I will strictly follow "Replace ast.literal_eval with json.loads" but I should probably handle the single quote issue if the data is dirty.
-                         # For now, let's stick to json.loads as requested for security.
-                         pass
+                        pass
+                    except Exception:
+                        # Fallback for legacy format if json fails but ast works (transition period)
+                        # BUT user asked to replace ast.literal_eval.
+                        # If the DB has single quotes, json.loads WILL fail.
+                        # I will strictly follow "Replace ast.literal_eval with json.loads" but I should probably handle the single quote issue if the data is dirty.
+                        # For now, let's stick to json.loads as requested for security.
+                        pass
                 if recipe.tags:
                     try:
                         rec_tags = json.loads(recipe.tags)
-                    except: pass
-            except: pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             total_score += score
             total_calories += cals
             items_count += 1
 
-            plan_items.append(MealItem(
-                day=day_num,
-                recipe_name=recipe.name,
-                calories=cals,
-                time=recipe.minutes,
-                match_score=round(score, 2),
-                tags=[tag] if tag == "Découverte" else [],
-                ingredients=ing_list,
-                recipe_tags=rec_tags
-            ))
+            plan_items.append(
+                MealItem(
+                    day=day_num,
+                    recipe_name=recipe.name,
+                    calories=cals,
+                    time=recipe.minutes,
+                    match_score=round(score, 2),
+                    tags=[tag] if tag == "Découverte" else [],
+                    ingredients=ing_list,
+                    recipe_tags=rec_tags,
+                )
+            )
 
     avg_score = total_score / items_count if items_count else 0
     avg_cals = total_calories / items_count if items_count else 0
@@ -431,6 +470,6 @@ def generate_planning_batch(request: PlanningRequest, db: Session = Depends(get_
         plan=plan_items,
         stats={
             "average_match_score": round(avg_score, 2),
-            "average_calories": round(avg_cals, 0)
-        }
+            "average_calories": round(avg_cals, 0),
+        },
     )

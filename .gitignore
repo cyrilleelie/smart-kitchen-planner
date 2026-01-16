@@ -17,10 +17,12 @@ raw_recipes.csv
 
 # Ignore les artefacts de ML
 mlruns/
+mlruns_old/
 reports/
 *.pkl
 *.joblib
 *.h5
+catalogue-*.whl
 
 # Environment variables
 .env
@@ -31,3 +33,10 @@ reports/
 
 # OS
 .DS_Store
+
+# Logs
+*.log
+
+# Coverage
+.coverage
+htmlcov/
