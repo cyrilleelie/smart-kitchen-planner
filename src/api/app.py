@@ -142,7 +142,7 @@ def generate_menu(request: Request, menu_data: MenuRequest, db: Session = Depend
 
     return MenuResponse(
         status="success",
-        user=f"User {request.user_id}",
+        user=f"User {menu_data.user_id}",
         plan=plan_items,
         stats={
             "average_match_score": round(avg_score, 2),
