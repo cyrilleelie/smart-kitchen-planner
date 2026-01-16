@@ -127,6 +127,12 @@ docker-compose exec app python src/scripts/seed_interactions.py
 
 ---
 
+## ⚠️ Configuration
+
+1. Copier `.env.example` vers `.env`
+2. Remplir les valeurs avec vos credentials
+3. **NE JAMAIS commiter le fichier `.env`**
+
 ## 🛠️ Commandes Utiles
 
 * **Voir les logs du Backend (API) :**
