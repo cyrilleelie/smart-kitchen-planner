@@ -274,9 +274,7 @@ def get_contextual_recommendations(request: Request, context_request: ContextReq
     # Appel du service MLflow
     recommendations = service.recommend(
         user_id=request.user_id,
-        meal_type=request.meal_type,
-        season=request.season,
-        n=5 # top_k is replaced by n
+        n=5
     )
     
     response = []

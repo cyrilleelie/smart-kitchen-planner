@@ -8,6 +8,8 @@ import json
 import logging
 from src.utils.logging_config import setup_logging
 from typing import Any, List, Dict
+from src.recommender.profile_builder import UserProfiler
+import datetime
 
 # Setup logging
 setup_logging()
@@ -176,7 +178,8 @@ class InferenceService:
                         "id": r.id,
                         "name": r.name,
                         "score": float(score),
-                        "type": "AI_CONTEXT"
+                        "type": "AI_CONTEXT",
+                        "recipe": r
                     })
                 
                 # Tri décroissant
