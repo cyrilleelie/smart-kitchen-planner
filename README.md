@@ -6,6 +6,14 @@ Le projet a été entièrement refondu pour adopter une **architecture micro-ser
 
 ---
 
+## ⚠️ Configuration de Sécurité
+
+1. Copier `.env.example` vers `.env`
+2. Remplir les valeurs avec vos credentials
+3. **NE JAMAIS commiter le fichier `.env`**
+
+---
+
 ## 🏗️ Architecture Technique Détaillée
 
 ### 1. Le Moteur de Recommandation Hybride
@@ -126,12 +134,6 @@ docker-compose exec app python src/scripts/seed_interactions.py
 ```
 
 ---
-
-## ⚠️ Configuration
-
-1. Copier `.env.example` vers `.env`
-2. Remplir les valeurs avec vos credentials
-3. **NE JAMAIS commiter le fichier `.env`**
 
 ## 🛠️ Commandes Utiles
 
