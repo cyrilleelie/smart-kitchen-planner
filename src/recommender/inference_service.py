@@ -1,10 +1,16 @@
 import random
-import json
 import mlflow.sklearn
 import numpy as np
 import ast
 from sqlalchemy.orm import Session
 from src.database.models import Interaction, Recipe
+import json
+import logging
+from src.utils.logging_config import setup_logging
+
+# Setup logging
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # Configuration
 MLFLOW_URI = "http://mlflow:5000"
@@ -57,8 +63,8 @@ class InferenceService:
                 parsed = json.loads(embedding_data)
                 return np.array(parsed, dtype=np.float32)
             except json.JSONDecodeError as e:
-                print(f"❌ Failed to parse embedding: {e}")
-                return np.zeros(384, dtype=np.float32)
+                logger.error(f"Failed to parse embedding: {e}")
+                raise ValueError(f"Invalid embedding format: {embedding_data[:50]}...")
         elif isinstance(embedding_data, list):
             return np.array(embedding_data, dtype=np.float32)
         return np.zeros(384, dtype=np.float32)
