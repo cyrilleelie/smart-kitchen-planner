@@ -102,16 +102,24 @@ docker-compose ps
 # Créer les tables et charger les recettes
 docker-compose exec app python src/scripts/init_db.py
 
+# Charger des recettes supplémentaires (batch de 1000 par défaut)
+docker-compose exec app python src/scripts/load_recipes.py --count 1000
+
+
 # Générer les embeddings (peut prendre quelques minutes)
 docker-compose exec app python src/scripts/generate_embeddings.py
 
-# Charger un utilisateur avec un profil prédéfini (persona) et génère des interactions en fonction du profil
+# Charger un utilisateur avec un profil prédéfini (persona) et génère des interactions en fonction du profil (nombre en paramètre dans le fichier json)
 # Exemples de personas disponibles dans data/personas/
 docker-compose exec app python src/scripts/inject_persona.py data/personas/sportif.json
 
+# Ajouter des interactions supplémentaires à un utilisateur existant
+# Arguments : <username> <nombre> <chemin_persona>
+docker-compose exec app python src/scripts/add_interactions.py Captain_Nemo 50 data/personas/captain_nemo.json
 
 # Réinitialiser un persona (Pour supprimer un user et toutes ses interactions)
 docker-compose exec app python src/scripts/reset_persona.py Captain_Nemo
+
 ```
 
 ### Accès aux Interfaces

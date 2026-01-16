@@ -2,7 +2,8 @@ import pandas as pd
 import ast
 import os
 import sys
-from sqlalchemy import func, text
+import argparse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 
@@ -13,7 +14,6 @@ from src.database.models import Recipe  # noqa: E402
 from src.database.connection import engine  # noqa: E402
 
 # CONFIGURATION
-BATCH_ADD = 1000
 CSV_PATHS = ["data/raw/RAW_recipes.csv"]
 
 
@@ -24,8 +24,8 @@ def get_csv_path():
     return None
 
 
-def simulate_data_drift():
-    print(f"🌊 --- SIMULATION DATA DRIFT ALÉATOIRE (BATCH: {BATCH_ADD}) ---")
+def load_recipes(count: int):
+    print(f"📦 --- CHARGEMENT DE {count} NOUVELLES RECETTES ---")
 
     with Session(engine) as session:
         # 1. IDs EXISTANTS
@@ -36,6 +36,7 @@ def simulate_data_drift():
 
         csv_path = get_csv_path()
         if not csv_path:
+            print("❌ Erreur : Fichier CSV source introuvable.")
             return
 
         # 2. LECTURE & FILTRAGE
@@ -49,11 +50,10 @@ def simulate_data_drift():
             print("✨ Stock épuisé ! Tout le CSV est déjà en base.")
             return
 
-        # 3. MÉLANGE ET SÉLECTION
-        # On mélange les candidats restants pour simuler une arrivée désordonnée
-        # Pas de random_state ici -> Aléatoire pur à chaque exécution
-        print("🎲 Mélange des candidats...")
-        batch = new_candidates.sample(frac=1).head(BATCH_ADD)
+        # 3. SÉLECTION ET CHARGEMENT
+        # On mélange les candidats pour charger un échantillon aléatoire (ou les n premiers dispos)
+        print("🎲 Sélection des nouvelles recettes...")
+        batch = new_candidates.sample(frac=1).head(count)
 
         print(f"📥 Injection de {len(batch)} nouvelles recettes...")
 
@@ -81,7 +81,7 @@ def simulate_data_drift():
                     ingredients=str(row["ingredients"]),
                     n_steps=int(row["n_steps"]),
                     steps=str(row["steps"]),
-                    embedding=None,  # Arrive vierge
+                    embedding=None,  # Arrive vierge, à calculer ensuite
                 )
                 new_recipes.append(recipe)
             except Exception:
@@ -90,7 +90,7 @@ def simulate_data_drift():
         session.add_all(new_recipes)
         session.commit()
 
-        # Mise à jour séquence (sécurité)
+        # Mise à jour séquence (PostgreSQL)
         try:
             # On met à jour la séquence par rapport au MAX ID présent en base
             session.execute(
@@ -99,12 +99,23 @@ def simulate_data_drift():
                 )
             )
             session.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            # Sur SQLite ou si la séquence n'existe pas, ça peut catch, ce n'est pas bloquant
+            print(f"   ℹ️ Ajustement séquence ignoré ({e})")
 
-        total_now = session.query(func.count(Recipe.id)).scalar()
-        print(f"✅ Drift terminé ! Base : {current_count} -> {total_now} recettes.")
+        print(f"✅ Succès : {len(new_recipes)} recettes ajoutées.")
 
 
 if __name__ == "__main__":
-    simulate_data_drift()
+    parser = argparse.ArgumentParser(
+        description="Script de chargement de nouvelles recettes."
+    )
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=1000,
+        help="Nombre de recettes à charger (défaut: 1000)",
+    )
+    args = parser.parse_args()
+
+    load_recipes(args.count)
