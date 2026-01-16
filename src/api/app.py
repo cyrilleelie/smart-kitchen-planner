@@ -6,7 +6,11 @@ from fastapi import FastAPI, HTTPException, Depends, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Dict, Any
-from datetime import datetime, timezone # <--- AJOUT IMPORTANT
+from datetime import datetime, timezone
+from starlette.requests import Request
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded # <--- AJOUT IMPORTANT
 
 # --- IMPORTS INTERNES ---
 from src.database.connection import get_db
@@ -14,6 +18,8 @@ from src.database.models import User, Interaction, Recipe
 from src.recommender.profile_builder import UserProfiler
 from src.recommender.solver import MenuSolver
 from src.recommender.inference_service import recommender_service
+from fastapi.middleware.cors import CORSMiddleware
+import os
 
 # --- SCHEMAS (Pydantic) ---
 from src.api.schemas import (
@@ -31,7 +37,20 @@ async def lifespan(app: FastAPI):
     print("🛑 Arrêt de l'API...")
 
 # Initialisation
-app = FastAPI(title="Smart Retail API", version="2.7-batch-controller", lifespan=lifespan)
+limiter = Limiter(key_func=get_remote_address)
+app = FastAPI(title="Smart Retail API", version="2.8", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Configurer CORS
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:8501").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ==========================================
@@ -56,21 +75,22 @@ def update_user_preferences(user_id: int, preferences: List[str] = Body(...), db
 # 2. GÉNÉRATEUR DE MENUS (Legacy Solver)
 # ==========================================
 @app.post("/generate-menu", response_model=MenuResponse)
-def generate_menu(request: MenuRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def generate_menu(request: Request, menu_data: MenuRequest, db: Session = Depends(get_db)):
     # A. Profiling
     profiler = UserProfiler(db)
     user_vector = profiler.get_weighted_profile(
-        request.user_id, 
-        request.preferences
+        menu_data.user_id, 
+        menu_data.preferences
     )
 
     # B. Solving
     solver = MenuSolver(
         db=db,
         user_vector=user_vector, 
-        days=request.days,
-        target_calories=request.target_calories_min,
-        meals_per_day=request.meals_per_day
+        days=menu_data.days,
+        target_calories=menu_data.target_calories_min,
+        meals_per_day=menu_data.meals_per_day
     )
     
     recommended_menu = solver.solve()
@@ -201,18 +221,19 @@ def explore_recipes(user_id: int, limit: int = 5, db: Session = Depends(get_db))
 # 5. RECOMMANDATION CONTEXTUELLE (AI POWERED)
 # ==========================================
 @app.post("/recommend", response_model=List[RecipeRecommendation])
-def get_contextual_recommendations(request: ContextRequest, db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+def get_contextual_recommendations(request: Request, context_data: ContextRequest, db: Session = Depends(get_db)):
     """
     Recommande 5 recettes basées sur le profil vectoriel et le contexte (Heure/Saison).
     """
-    user = db.query(User).filter(User.id == request.user_id).first()
+    user = db.query(User).filter(User.id == context_data.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
 
     recommendations = recommender_service.recommend(
-        user_id=request.user_id,
-        meal_type=request.meal_type,
-        season=request.season,
+        user_id=context_data.user_id,
+        meal_type=context_data.meal_type,
+        season=context_data.season,
         session=db,
         top_k=5
     )
