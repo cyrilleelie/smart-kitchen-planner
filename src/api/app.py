@@ -16,7 +16,7 @@ from src.database.connection import get_db
 from src.database.models import User, Interaction, Recipe
 from src.recommender.profile_builder import UserProfiler
 from src.recommender.solver import MenuSolver
-from src.recommender.inference_service import recommender_service
+from src.recommender.inference_service import InferenceService
 import json
 import logging
 from src.utils.logging_config import setup_logging
@@ -268,12 +268,15 @@ def get_contextual_recommendations(request: Request, context_request: ContextReq
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
 
-    recommendations = recommender_service.recommend(
+    # Instantiation du service avec la session DB
+    service = InferenceService(db)
+    
+    # Appel du service MLflow
+    recommendations = service.recommend(
         user_id=request.user_id,
         meal_type=request.meal_type,
         season=request.season,
-        session=db,
-        top_k=5
+        n=5 # top_k is replaced by n
     )
     
     response = []

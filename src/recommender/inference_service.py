@@ -300,5 +300,3 @@ class InferenceService:
 
         random.shuffle(final_selection)
         return final_selection[:n_days]
-
-recommender_service = InferenceService()
