@@ -12,8 +12,7 @@ poetry.lock
 raw_recipes.csv
 
 # Ignorer la Base de Données
-*.db
-*.sqlite3
+
 
 # Ignore les artefacts de ML
 mlruns/

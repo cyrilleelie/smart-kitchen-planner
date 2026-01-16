@@ -105,9 +105,13 @@ docker-compose exec app python src/scripts/init_db.py
 # Générer les embeddings (peut prendre quelques minutes)
 docker-compose exec app python src/scripts/generate_embeddings.py
 
-# Charger un utilisateur avec un profil prédéfini (persona)
+# Charger un utilisateur avec un profil prédéfini (persona) et génère des interactions en fonction du profil
 # Exemples de personas disponibles dans data/personas/
 docker-compose exec app python src/scripts/inject_persona.py data/personas/sportif.json
+
+
+# Réinitialiser un persona (Pour supprimer un user et toutes ses interactions)
+docker-compose exec app python src/scripts/reset_persona.py Captain_Nemo
 ```
 
 ### Accès aux Interfaces
@@ -124,9 +128,8 @@ docker-compose exec app python src/scripts/inject_persona.py data/personas/sport
 
 | Méthode | Endpoint | Description | Rate Limit |
 |---------|----------|-------------|------------|
-| `POST` | `/generate-menu` | Génère un planning (algorithme heuristique) | 10/min |
 | `POST` | `/recommend` | Recommandations contextuelles (ML) | 30/min |
-| `POST` | `/generate-planning` | Planning avec stratégie Batch & Split | - |
+| `POST` | `/generate-planning` | Planning avec stratégie Batch & Split | 10/min |
 | `PUT` | `/user/{id}/preferences` | Met à jour les préférences | 50/min |
 | `POST` | `/feedback` | Enregistre une note utilisateur | - |
 | `GET` | `/explore` | Découvrir de nouvelles recettes | - |
@@ -204,7 +207,6 @@ docker-compose exec app python src/mlops/orchestrator.py
 - ✅ **Secrets externalisés** : Pas de credentials dans le code
 - ✅ **Rate Limiting** : Protection contre les abus (slowapi)
 - ✅ **CORS configuré** : Origines autorisées contrôlées
-- ✅ **Parsing sécurisé** : `json.loads()` au lieu de `eval()`
 - ✅ **Logging structuré** : Traçabilité des erreurs
 
 ---
