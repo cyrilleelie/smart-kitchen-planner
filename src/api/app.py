@@ -1,3 +1,5 @@
+import json
+import logging
 import ast
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Body
@@ -91,9 +93,11 @@ def generate_menu(request: MenuRequest, db: Session = Depends(get_db)):
         cals = 0.0
         try:
             if recipe.nutrition_info:
-                nutr_list = ast.literal_eval(recipe.nutrition_info)
-                cals = float(nutr_list[0])
-        except: cals = 0.0
+                nutr_list = json.loads(recipe.nutrition_info)
+                if isinstance(nutr_list, list) and len(nutr_list) > 0:
+                    cals = float(nutr_list[0])
+        except (json.JSONDecodeError, ValueError, TypeError):
+            cals = 0.0
 
         total_score += raw_score
         total_cals_accumulated += cals
@@ -219,9 +223,11 @@ def get_contextual_recommendations(request: ContextRequest, db: Session = Depend
         cals = 0.0
         try:
             if recipe.nutrition_info:
-                nutr_list = ast.literal_eval(recipe.nutrition_info)
-                cals = float(nutr_list[0])
-        except: pass
+                nutr_list = json.loads(recipe.nutrition_info)
+                if isinstance(nutr_list, list) and len(nutr_list) > 0:
+                    cals = float(nutr_list[0])
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
 
         response.append(RecipeRecommendation(
             id=recipe.id,
@@ -313,12 +319,19 @@ def generate_planning_batch(request: PlanningRequest, db: Session = Depends(get_
             rec_tags = []
             try:
                 if recipe.nutrition_info:
-                    cals = float(ast.literal_eval(recipe.nutrition_info)[0])
+                    parsed = json.loads(recipe.nutrition_info)
+                    if isinstance(parsed, list) and len(parsed) > 0:
+                        cals = float(parsed[0])
                 if recipe.ingredients:
-                    ing_list = ast.literal_eval(recipe.ingredients)
+                    parsed = json.loads(recipe.ingredients)
+                    if isinstance(parsed, list):
+                        ing_list = parsed
                 if recipe.tags:
-                    rec_tags = ast.literal_eval(recipe.tags)
-            except: pass
+                    parsed = json.loads(recipe.tags)
+                    if isinstance(parsed, list):
+                        rec_tags = parsed
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
 
             total_score += score
             total_calories += cals
