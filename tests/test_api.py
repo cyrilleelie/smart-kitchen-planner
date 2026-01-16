@@ -111,7 +111,10 @@ def test_contextual_recommendation(client, mock_db_session):
     with patch('src.recommender.inference_service.InferenceService') as MockServiceClass:
         mock_instance = MockServiceClass.return_value
         
-        mock_db_session.query.return_value.filter.return_value.first.return_value = Mock()
+        # CORRECTION : Mock user doit avoir preferences comme liste, pas Mock
+        mock_user = Mock()
+        mock_user.preferences = []
+        mock_db_session.query.return_value.filter.return_value.first.return_value = mock_user
         
         # CORRECTION : SimpleNamespace
         mock_recipe = SimpleNamespace(id=200, name="Salad", minutes=10, nutrition_info="['200']", ingredients="[]", tags="[]")
