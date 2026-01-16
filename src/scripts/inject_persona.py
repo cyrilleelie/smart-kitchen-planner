@@ -11,11 +11,45 @@ from sqlalchemy import func, text
 sys.path.append(os.getcwd())
 from src.database.connection import engine  # noqa: E402
 from src.database.models import User, Recipe, Interaction  # noqa: E402
+from src.utils.translations import PREFERENCE_TAGS_MAP  # noqa: E402
+
+# Création du mapping inverse : EN -> FR
+TAGS_EN_TO_FR = {v: k for k, v in PREFERENCE_TAGS_MAP.items()}
 
 
 def load_persona(json_path):
     with open(json_path, "r") as f:
         return json.load(f)
+
+
+def translate_preferences(english_prefs):
+    """Traduit les préférences (anglais du JSON) vers les labels UI (français attendus par UserProfiler)"""
+    french_prefs = []
+    for p in english_prefs:
+        p_clean = (
+            p.strip().lower()
+        )  # Sécurité : tout en minuscules pour matcher les valeurs
+        found = False
+        # Recherche exacte
+        if p_clean in TAGS_EN_TO_FR:
+            french_prefs.append(TAGS_EN_TO_FR[p_clean])
+            found = True
+        else:
+            # Fallback : recherche un peu plus souple ou log
+            # Parfois "vegetarian" vs "Vegetarian"
+            # On parcourt les valeurs si match direct échoue (peu performant mais ok pour script one-shot)
+            for en_val, fr_key in TAGS_EN_TO_FR.items():
+                if en_val.lower() == p_clean:
+                    french_prefs.append(fr_key)
+                    found = True
+                    break
+
+        if not found:
+            print(
+                f"   ⚠️ Warning: Le tag '{p}' n'a pas de traduction connue. Il sera ignoré par UserProfiler."
+            )
+
+    return french_prefs
 
 
 def get_weighted_rating(values, weights):
@@ -70,9 +104,13 @@ def inject_data(json_file):
         # A. Création / Récupération du User
         user = session.query(User).filter(User.username == persona["username"]).first()
         if not user:
-            user = User(
-                username=persona["username"], preferences=persona["preferences"]
+            # TRADUCTION DES PREFERENCES AVANT INSERTION
+            translated_prefs = translate_preferences(persona["preferences"])
+            print(
+                f"   📝 Traduction préférences : {persona['preferences']} -> {translated_prefs}"
             )
+
+            user = User(username=persona["username"], preferences=translated_prefs)
             session.add(user)
             session.commit()
             print(f"   👤 Nouvel utilisateur créé : {user.username} (ID: {user.id})")

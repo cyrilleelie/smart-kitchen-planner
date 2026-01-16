@@ -100,48 +100,6 @@ def test_explore_recipes(client, mock_db_session):
 # --- TESTS SERVICES ---
 
 
-@patch("src.api.app.UserProfiler")
-@patch("src.api.app.MenuSolver")
-def test_generate_menu_legacy(
-    mock_solver_cls, mock_profiler_cls, client, mock_db_session
-):
-    """POST /generate-menu"""
-    mock_profiler_instance = mock_profiler_cls.return_value
-    mock_profiler_instance.get_weighted_profile.return_value = [0.1, 0.2]
-
-    mock_solver_instance = mock_solver_cls.return_value
-    mock_solver_instance.solve.return_value = [
-        {"day": 1, "recipe_id": 50, "algo_type": "PERF", "score": 0.95}
-    ]
-
-    # CORRECTION : SimpleNamespace
-    mock_recipe = SimpleNamespace(
-        id=50,
-        name="Super Pasta",
-        minutes=15,
-        nutrition_info="['500']",
-        ingredients="[]",
-        tags="[]",
-    )
-    mock_db_session.query.return_value.filter.return_value.first.return_value = (
-        mock_recipe
-    )
-
-    response = client.post(
-        "/generate-menu",
-        json={
-            "user_id": 1,
-            "preferences": ["italian"],
-            "days": 1,
-            "target_calories_min": 1800,
-            "meals_per_day": 1,
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["plan"][0]["recipe_name"] == "Super Pasta"
-
-
 def test_contextual_recommendation(client, mock_db_session):
     """POST /recommend"""
     # On récupère le mock via le patch actif (qui est dans la fixture client)

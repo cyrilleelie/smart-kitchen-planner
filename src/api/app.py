@@ -13,8 +13,7 @@ import os  # <--- AJOUT IMPORTANT
 # --- IMPORTS INTERNES ---
 from src.database.connection import get_db
 from src.database.models import User, Interaction, Recipe
-from src.recommender.profile_builder import UserProfiler
-from src.recommender.solver import MenuSolver
+
 from src.recommender.inference_service import InferenceService
 import json
 import logging
@@ -23,7 +22,6 @@ from src.utils.logging_config import setup_logging
 # Setup logging
 # --- SCHEMAS (Pydantic) ---
 from src.api.schemas import (
-    MenuRequest,
     MenuResponse,
     MealItem,
     FeedbackRequest,
@@ -86,114 +84,7 @@ def update_user_preferences(
 
 
 # ==========================================
-# 2. GÉNÉRATEUR DE MENUS (Legacy Solver)
-# ==========================================
-@app.post("/generate-menu", response_model=MenuResponse)
-@limiter.limit("10/minute")
-def generate_menu(
-    request: Request,
-    menu_request: MenuRequest = Body(...),
-    db: Session = Depends(get_db),
-):
-    """
-    Generate a weekly menu plan using the heuristic solver.
-
-    Args:
-        request: Raw request (for rate limiting)
-        menu_request: Menu generation parameters (user_id, days, calories)
-        db: Database session
-
-    Returns:
-        MenuResponse: The generated menu with recipes for each day.
-
-    Raises:
-        HTTPException(404): If user is not found.
-    """
-    # Note: nous avons renommé 'request' -> 'menu_request' pour Pydantic, car 'request' est pris par limiter
-    request = menu_request  # Alias pour garder la compatibilité du code existant
-    # A. Profiling
-    profiler = UserProfiler(db)
-    user_vector = profiler.get_weighted_profile(request.user_id, request.preferences)
-
-    # B. Solving
-    solver = MenuSolver(
-        db=db,
-        user_vector=user_vector,
-        days=request.days,
-        target_calories=request.target_calories_min,
-        meals_per_day=request.meals_per_day,
-    )
-
-    recommended_menu = solver.solve()
-
-    # C. Construction de la réponse
-    plan_items = []
-    total_score = 0
-    total_cals_accumulated = 0
-
-    for item in recommended_menu:
-        day_num = item["day"]
-        recipe_id = item["recipe_id"]
-        algo_type = item["algo_type"]  # "PERF", "DISCO", "RESCUE"
-        raw_score = item["score"]
-
-        recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
-        if not recipe:
-            continue
-
-        # Parsing Calories
-        cals = 0.0
-        try:
-            if recipe.nutrition_info:
-                nutr_list = json.loads(recipe.nutrition_info)
-                if isinstance(nutr_list, list) and len(nutr_list) > 0:
-                    cals = float(nutr_list[0])
-                else:
-                    logger.warning(
-                        f"Invalid nutrition_info format for recipe {recipe.id}"
-                    )
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            logger.warning(
-                f"Failed to parse nutrition_info for recipe {recipe.id}: {e}"
-            )
-            cals = 0.0
-
-        total_score += raw_score
-        total_cals_accumulated += cals
-
-        # Gestion des Tags UI
-        current_tags = []
-        if algo_type == "DISCO":
-            current_tags.append("Découverte")
-
-        plan_items.append(
-            MealItem(
-                day=day_num,
-                recipe_name=recipe.name,
-                calories=cals,
-                time=recipe.minutes,
-                match_score=round(raw_score, 2),
-                tags=current_tags,
-            )
-        )
-
-    nb_items = len(recommended_menu)
-    avg_score = total_score / nb_items if nb_items else 0
-    avg_cals = total_cals_accumulated / nb_items if nb_items else 0
-
-    return MenuResponse(
-        status="success",
-        user=f"User {request.user_id}",
-        plan=plan_items,
-        stats={
-            "average_match_score": round(avg_score, 2),
-            "average_calories": round(avg_cals, 0),
-        },
-    )
-
-
-# ==========================================
-# 3. FEEDBACK & INTERACTIONS
+# 2. FEEDBACK & INTERACTIONS
 # ==========================================
 @app.post("/feedback")
 def submit_feedback(feedback: FeedbackRequest, db: Session = Depends(get_db)):
@@ -333,11 +224,19 @@ def get_contextual_recommendations(
 # 6. PLANIFICATEUR CONTEXTUEL (BATCH & SPLIT)
 # ==========================================
 @app.post("/generate-planning", response_model=MenuResponse)
-def generate_planning_batch(request: PlanningRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def generate_planning_batch(
+    request: Request,
+    planning_request: PlanningRequest = Body(...),
+    db: Session = Depends(get_db),
+):
     """
+    Génère un planning en appelant recommend_weekly_batch.
     Génère un planning en appelant recommend_weekly_batch.
     Implémente le 'Batch & Split' pour éviter les doublons Midi/Soir.
     """
+    # Alias pour compatibilité interne (request désignait le Pydantic model avant)
+    request = planning_request
     selected_set = set(request.selected_meals)
 
     # Structure temporaire pour stocker les résultats par jour

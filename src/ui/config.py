@@ -13,6 +13,8 @@ TAG_CATEGORIES = {
         "Sans gluten",
         "Sans lactose",
         "Faible en calories",
+        "Pescétarien",
+        "Sain",
     ],
     "Cuisines du Monde": [
         "Française",
@@ -24,5 +26,13 @@ TAG_CATEGORIES = {
         "Américaine",
     ],
     "Saveurs": ["Épicé", "Sucré-salé", "Frais", "Réconfortant"],
-    "Ingrédients": ["Chocolat", "Fromage", "Fruits de mer", "Champignons", "Avocat"],
+    "Ingrédients": [
+        "Chocolat",
+        "Fromage",
+        "Fruits de mer",
+        "Champignons",
+        "Avocat",
+        "Poisson",
+        "Pâtes",
+    ],
 }

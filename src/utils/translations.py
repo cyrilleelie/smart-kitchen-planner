@@ -6,6 +6,8 @@ PREFERENCE_TAGS_MAP = {
     "Sans gluten": "gluten-free",
     "Sans lactose": "dairy-free",
     "Faible en calories": "low-calorie",
+    "Pescétarien": "pescetarian",
+    "Sain": "healthy",
     # Cuisines du monde
     "Française": "french",
     "Italienne": "italian",
@@ -25,6 +27,8 @@ PREFERENCE_TAGS_MAP = {
     "Fruits de mer": "seafood",
     "Champignons": "mushrooms",
     "Avocat": "avocados",
+    "Poisson": "fish",
+    "Pâtes": "pasta",
     # Moments
     "Petit-déjeuner": "breakfast",
     "Déjeuner": "lunch",
