@@ -82,6 +82,20 @@ def update_user_preferences(user_id: int, preferences: List[str] = Body(...), db
 @app.post("/generate-menu", response_model=MenuResponse)
 @limiter.limit("10/minute")
 def generate_menu(request: Request, menu_request: MenuRequest = Body(...), db: Session = Depends(get_db)):
+    """
+    Generate a weekly menu plan using the heuristic solver.
+    
+    Args:
+        request: Raw request (for rate limiting)
+        menu_request: Menu generation parameters (user_id, days, calories)
+        db: Database session
+        
+    Returns:
+        MenuResponse: The generated menu with recipes for each day.
+        
+    Raises:
+        HTTPException(404): If user is not found.
+    """
     # Note: nous avons renommé 'request' -> 'menu_request' pour Pydantic, car 'request' est pris par limiter
     request = menu_request # Alias pour garder la compatibilité du code existant
     # A. Profiling
@@ -234,7 +248,20 @@ def explore_recipes(user_id: int, limit: int = 5, db: Session = Depends(get_db))
 @limiter.limit("30/minute")
 def get_contextual_recommendations(request: Request, context_request: ContextRequest = Body(...), db: Session = Depends(get_db)):
     """
-    Recommande 5 recettes basées sur le profil vectoriel et le contexte (Heure/Saison).
+    Get 5 contextual recipe recommendations based on AI model.
+    
+    Uses Random Forest model to predict recipe relevance based on:
+    - User profile (embeddings)
+    - Recipe features (embeddings)
+    - Context (Time of day, Season)
+    
+    Args:
+        request: Raw request
+        context_request: User ID and optional manual context overrides
+        db: Database session
+        
+    Returns:
+        List[RecipeRecommendation]: Top 5 recommended recipes.
     """
     request = context_request # Alias
     user = db.query(User).filter(User.id == request.user_id).first()

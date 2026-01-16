@@ -7,20 +7,57 @@ from src.database.models import Recipe
 import logging
 from src.utils.logging_config import setup_logging
 import json
+from typing import Any
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 class MenuSolver:
+    """
+    Generate optimized meal plans based on user preferences and constraints.
+    
+    This solver combines performance-based recommendations (80%) with
+    discovery suggestions (20%) to create diverse and personalized meal
+    plans that respect user constraints (calories, preparation time, etc.).
+    
+    Attributes:
+        db (Session): SQLAlchemy database session
+        user_vector (list): User's preference vector (384 dimensions)
+        days (int): Number of days to plan (1-14)
+        cal_target (int): Daily calorie target
+        meals_per_day (int): Number of meals per day (usually 2: Lunch/Dinner)
+    """
+    
     def __init__(self, db: Session, user_vector: list, days: int, target_calories: int, meals_per_day: int):
+        """
+        Initialize the MenuSolver.
+
+        Args:
+            db: Active database session
+            user_vector: User embedding vector (list or numpy array)
+            days: Number of days to generate
+            target_calories: Calorie target per meal (approx)
+            meals_per_day: Number of meals to plan per day
+        """
         self.db = db
         self.user_vector = np.array(user_vector) if user_vector is not None and len(user_vector) > 0 else None
         self.days = days
-        self.target_calories = target_calories
+        self.cal_target = target_calories
         self.meals_per_day = meals_per_day
+        # Tolérance : on filtre ce qui est > 1.5x la cible (pour éviter les cheatmeals extrêmes)
         self.cal_max = target_calories * 1.5
 
-    def solve(self):
+    def solve(self) -> list[dict[str, Any]]:
+        """
+        Execute the solver algorithm to generate the meal plan.
+
+        Returns:
+            List[Dict[str, Any]]: A list of menu items, each containing:
+                - day (int): Day number
+                - recipe_id (int): Recipe ID
+                - algo_type (str): 'PERF', 'DISCO', or 'RESCUE'
+                - score (float): Recommendation confidence score
+        """
         logger.info(f"🔧 [SOLVER] Stratégie : Quantiles Dynamiques (Calibration Auto)")
         
         # 1. CHARGEMENT
@@ -132,7 +169,17 @@ class MenuSolver:
     def calculate_score(self, recipe):
         return self._calculate_similarity(recipe.embedding)
 
-    def _calculate_similarity(self, embedding_data):
+    
+    def _calculate_similarity(self, embedding_data: str | list | np.ndarray) -> float:
+        """
+        Check cosine similarity between user vector and recipe embedding.
+
+        Args:
+            embedding_data: Recipe embedding (JSON string, list, or numpy array)
+
+        Returns:
+            float: Similarity score between 0.0 and 1.0. Returns 0.5 on error.
+        """
         if self.user_vector is None or embedding_data is None: return 0.5
         try:
             if isinstance(embedding_data, str):

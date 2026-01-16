@@ -12,22 +12,54 @@ logger = logging.getLogger(__name__)
 from src.utils.translations import PREFERENCE_TAGS_MAP
 
 class UserProfiler:
+    """
+    Builds a weighted user profile vector from explicit preferences and implicit interactions.
+    
+    Attributes:
+        db (Session): SQLAlchemy database session
+    """
+    
     def __init__(self, db: Session):
+        """
+        Initialize the UserProfiler.
+
+        Args:
+            db: Active database session
+        """
         self.db = db
 
-    def get_converted_tags(self, preferences: list) -> list:
-        """Traduit les tags FR du front en tags EN pour la BDD"""
-        if not preferences:
-            return []
-        
-        # On utilise le dictionnaire importé
-        # .get(p, p) signifie : si on trouve la traduction, on la prend.
-        # Sinon, on garde le mot d'origine (au cas où le front envoie déjà de l'anglais ou un nouveau tag)
-        return [PREFERENCE_TAGS_MAP.get(p, p) for p in preferences]
-
-    def get_weighted_profile(self, user_id: int, request_tags: list = None):
+    def get_converted_tags(self, raw_tags: list[str]) -> list[str]:
         """
-        Génère le vecteur utilisateur à la volée.
+        Convert raw UI tags (French) to internal tags (English).
+
+        Args:
+            raw_tags: List of tags in French (e.g. ['Véxétarien'])
+
+        Returns:
+            List[str]: List of corresponding English tags (e.g. ['vegetarian']).
+        """
+        # On nettoie et on mappe
+        clean_tags = []
+        for tag in raw_tags:
+            t = tag.strip()
+            if t in PREFERENCE_TAGS_MAP:
+                clean_tags.append(PREFERENCE_TAGS_MAP[t])
+        return clean_tags
+
+    def get_weighted_profile(self, user_id: int, request_tags: list[str] = None) -> np.ndarray | None:
+        """
+        Compute the weighted average vector for a user.
+
+        Combines:
+        1. Explicit Preference Vectors (from tags) - weighted x3
+        2. Implicit Interaction Vectors (from liked recipes) - weighted x1
+
+        Args:
+            user_id: ID of the user
+            request_tags: List of explicit preference tags (French)
+
+        Returns:
+            np.ndarray | None: The 384-dimensional user vector, or None if Cold Start.
         """
         vectors = []
         
@@ -40,8 +72,8 @@ class UserProfiler:
         current_request = request_tags if request_tags else []
         
         # 3. Fusion et Traduction
-        raw_tags = list(set(stored_prefs + current_request))
-        active_tags = self.get_converted_tags(raw_tags)
+        raw_tags_combined = list(set(stored_prefs + current_request))
+        active_tags = self.get_converted_tags(raw_tags_combined)
         
         if active_tags:
             logger.info(f"👤 [PROFILER] Tags actifs (EN) pour User {user_id}: {active_tags}")
@@ -59,9 +91,12 @@ class UserProfiler:
                 
                 if sample_recipes:
                     tag_vectors = [self._parse_embedding(r.embedding) for r in sample_recipes]
-                    avg_tag_vec = np.mean(tag_vectors, axis=0)
-                    # Poids fort (x3)
-                    vectors.extend([avg_tag_vec] * 3)
+                    # Filter out empty lists from parsing errors
+                    tag_vectors = [vec for vec in tag_vectors if vec]
+                    if tag_vectors:
+                        avg_tag_vec = np.mean(tag_vectors, axis=0)
+                        # Poids fort (x3)
+                        vectors.extend([avg_tag_vec] * 3)
                 else:
                     logger.warning(f"   ⚠️ Tag '{tag}' ignoré (aucune recette trouvée).")
 
@@ -76,8 +111,9 @@ class UserProfiler:
             if interaction.recipe and interaction.recipe.embedding:
                 try:
                     vec = self._parse_embedding(interaction.recipe.embedding)
-                    vectors.append(vec)
-                    count_interactions += 1
+                    if vec: # Ensure embedding was successfully parsed
+                        vectors.append(vec)
+                        count_interactions += 1
                 except Exception as e:
                     logger.warning(f"Failed to parse embedding for recipe {interaction.recipe.id}: {e}")
                     continue
@@ -91,10 +127,20 @@ class UserProfiler:
             # Le Solver basculera en mode "Aléatoire" ou "Populaire"
             return None
 
-        user_vector = np.mean(vectors, axis=0).tolist()
-        return user_vector
+        # Moyenne pondérée
+        final_vector = np.mean(vectors, axis=0)
+        return final_vector.astype(np.float32)
 
-    def _parse_embedding(self, embedding_field):
+    def _parse_embedding(self, embedding_field: str | list | None) -> list | Any:
+        """
+        Parse embedding field safely.
+
+        Args:
+            embedding_field: Raw embedding data from DB (str or list)
+
+        Returns:
+            list: Parsed embedding list or empty list if failure.
+        """
         if embedding_field is None: return []
         if isinstance(embedding_field, str): 
             try:
