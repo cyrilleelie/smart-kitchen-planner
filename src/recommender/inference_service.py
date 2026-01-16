@@ -1,4 +1,5 @@
 import random
+import json
 import mlflow.sklearn
 import numpy as np
 import ast
@@ -38,9 +39,26 @@ class InferenceService:
             print(f"❌ Erreur chargement modèle: {e}")
 
     def _parse_vector(self, embedding_data):
-        """Helper pour parser les vecteurs stockés en string ou list"""
+        """
+        Parse embedding data into numpy array.
+        
+        Args:
+            embedding_data: String representation or list of floats
+            
+        Returns:
+            numpy array of float32
+            
+        Raises:
+            json.JSONDecodeError: If string is not valid JSON
+            ValueError: If data cannot be converted to array
+        """
         if isinstance(embedding_data, str):
-            return np.array(eval(embedding_data), dtype=np.float32)
+            try:
+                parsed = json.loads(embedding_data)
+                return np.array(parsed, dtype=np.float32)
+            except json.JSONDecodeError as e:
+                print(f"❌ Failed to parse embedding: {e}")
+                return np.zeros(384, dtype=np.float32)
         elif isinstance(embedding_data, list):
             return np.array(embedding_data, dtype=np.float32)
         return np.zeros(384, dtype=np.float32)
