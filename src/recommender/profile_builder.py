@@ -3,6 +3,10 @@ import numpy as np
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from src.database.models import User, Interaction, Recipe
+import logging
+import json
+
+logger = logging.getLogger(__name__)
 
 # IMPORT DEPUIS LES UTILS (C'est beaucoup plus propre)
 from src.utils.translations import PREFERENCE_TAGS_MAP
@@ -40,7 +44,7 @@ class UserProfiler:
         active_tags = self.get_converted_tags(raw_tags)
         
         if active_tags:
-            print(f"👤 [PROFILER] Tags actifs (EN) pour User {user_id}: {active_tags}")
+            logger.info(f"👤 [PROFILER] Tags actifs (EN) pour User {user_id}: {active_tags}")
 
         # --- B. VECTEURS D'INTENTION (Tags) ---
         if active_tags:
@@ -59,7 +63,7 @@ class UserProfiler:
                     # Poids fort (x3)
                     vectors.extend([avg_tag_vec] * 3)
                 else:
-                    print(f"   ⚠️ Tag '{tag}' ignoré (aucune recette trouvée).")
+                    logger.warning(f"   ⚠️ Tag '{tag}' ignoré (aucune recette trouvée).")
 
         # --- C. VECTEUR HISTORIQUE (Interactions) ---
         interactions = self.db.query(Interaction).filter(
@@ -74,11 +78,12 @@ class UserProfiler:
                     vec = self._parse_embedding(interaction.recipe.embedding)
                     vectors.append(vec)
                     count_interactions += 1
-                except:
+                except Exception as e:
+                    logger.warning(f"Failed to parse embedding for recipe {interaction.recipe.id}: {e}")
                     continue
         
         if count_interactions > 0:
-            print(f"   ⭐ [PROFILER] {count_interactions} recettes aimées intégrées.")
+            logger.info(f"   ⭐ [PROFILER] {count_interactions} recettes aimées intégrées.")
 
         # --- D. FUSION FINALE ---
         if not vectors:
@@ -91,5 +96,10 @@ class UserProfiler:
 
     def _parse_embedding(self, embedding_field):
         if embedding_field is None: return []
-        if isinstance(embedding_field, str): return json.loads(embedding_field)
+        if isinstance(embedding_field, str): 
+            try:
+                return json.loads(embedding_field)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid JSON for embedding: {embedding_field[:50]}...")
+                return []
         return embedding_field

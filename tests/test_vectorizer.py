@@ -16,8 +16,7 @@ with patch.dict('sys.modules', {
 
 @patch('src.recommender.vectorizer.Session')
 @patch('src.recommender.vectorizer.SentenceTransformer')
-@patch('src.recommender.vectorizer.setup_logging')
-def test_generate_recipe_embeddings_flow(mock_logging, mock_transformer_cls, mock_session_cls):
+def test_generate_recipe_embeddings_flow(mock_transformer_cls, mock_session_cls):
     """Teste le flux de vectorisation"""
     # 1. Config NLP
     mock_model = mock_transformer_cls.return_value
@@ -32,9 +31,10 @@ def test_generate_recipe_embeddings_flow(mock_logging, mock_transformer_cls, moc
     # 3. Config Query "Bulldozer"
     # On crée un objet Mock pour la Query
     mock_query = MagicMock()
-    mock_session.query.side_effect = lambda *args: mock_query
+    mock_session.query.return_value = mock_query
     
     # CRITIQUE : On configure toutes les méthodes de chaînage pour renvoyer self
+    # Cela garantit qu'on reste toujours sur le même objet 'mock_query'
     mock_query.filter.return_value = mock_query
     mock_query.limit.return_value = mock_query
     mock_query.order_by.return_value = mock_query
@@ -46,6 +46,7 @@ def test_generate_recipe_embeddings_flow(mock_logging, mock_transformer_cls, moc
     mock_query.first.return_value = r1
 
     # 4. Exécution
+    from src.recommender.vectorizer import generate_recipe_embeddings
     generate_recipe_embeddings()
     
     # 5. Assertions
