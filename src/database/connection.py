@@ -16,6 +16,7 @@ else:
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+
 def get_db():
     """Générateur de session pour FastAPI et scripts"""
     db = SessionLocal()
