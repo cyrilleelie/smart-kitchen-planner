@@ -7,6 +7,7 @@ from src.database.models import Interaction, Recipe
 import json
 import logging
 from src.utils.logging_config import setup_logging
+from typing import Any, List, Dict
 
 # Setup logging
 setup_logging()

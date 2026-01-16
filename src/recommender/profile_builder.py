@@ -5,6 +5,7 @@ from sqlalchemy import or_
 from src.database.models import User, Interaction, Recipe
 import logging
 import json
+from typing import Any, List
 
 logger = logging.getLogger(__name__)
 
