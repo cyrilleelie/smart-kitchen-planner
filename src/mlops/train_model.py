@@ -11,6 +11,11 @@ import mlflow
 import mlflow.sklearn
 import ast
 from dotenv import load_dotenv
+import logging
+from src.utils.logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -116,17 +121,17 @@ def calculate_context_penalty(recipe, meal_type, season):
     return penalty
 
 def train():
-    print("🚀 Démarrage de l'entraînement Context-Aware (Simplifié: 3 types de repas)...")
+    logger.info("🚀 Démarrage de l'entraînement Context-Aware (Simplifié: 3 types de repas)...")
     
     mlflow.set_tracking_uri(MLFLOW_URI)
     mlflow.set_experiment(EXPERIMENT_NAME)
     
     with Session(engine) as session:
-        print("   📥 Chargement des interactions brutes...")
+        logger.info("   📥 Chargement des interactions brutes...")
         results = session.query(Interaction, Recipe).join(Recipe).all()
         
         if not results:
-            print("   ❌ Erreur : Pas de données.")
+            logger.error("   ❌ Erreur : Pas de données.")
             return
 
         # 1. Préparation des données brutes
@@ -140,10 +145,10 @@ def train():
             })
         
         df_raw = pd.DataFrame(raw_data)
-        print(f"   📚 Interactions réelles : {len(df_raw)}")
+        logger.info(f"   📚 Interactions réelles : {len(df_raw)}")
 
     # 2. Feature Engineering : Vecteurs Utilisateurs
-    print("   🧠 Calcul des profils utilisateurs...")
+    logger.info("   🧠 Calcul des profils utilisateurs...")
     user_vectors = {}
     for user_id in df_raw['user_id'].unique():
         user_likes = df_raw[(df_raw['user_id'] == user_id) & (df_raw['base_rating'] >= 4)]
@@ -155,7 +160,7 @@ def train():
         user_vectors[user_id] = user_mean_vec
 
     # 3. DATA AUGMENTATION
-    print("   🧪 Génération des scénarios d'entraînement...")
+    logger.info("   🧪 Génération des scénarios d'entraînement...")
     
     X_list = []
     y_list = []
@@ -184,7 +189,7 @@ def train():
     X = np.array(X_list)
     y = np.array(y_list)
     
-    print(f"   📊 Dataset augmenté final : {len(X)} lignes.")
+    logger.info(f"   📊 Dataset augmenté final : {len(X)} lignes.")
 
     # 4. Entraînement
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -194,14 +199,14 @@ def train():
         params = {"n_estimators": 50, "max_depth": 15}
         mlflow.log_params(params)
         
-        print("   🏋️‍♂️ Entraînement du modèle (Random Forest)...")
+        logger.info("   🏋️‍♂️ Entraînement du modèle (Random Forest)...")
         model = RandomForestRegressor(n_estimators=params["n_estimators"], 
                                       max_depth=params["max_depth"], 
                                       n_jobs=-1, random_state=42)
         model.fit(X_train, y_train)
 
         # --- AJOUT MLOPS : Sauvegarde de la Reference Data ---
-        print("   💾 Sauvegarde de la Reference Data pour Evidently...")
+        logger.info("   💾 Sauvegarde de la Reference Data pour Evidently...")
         
         # On reconstitue un DataFrame propre pour le futur monitoring
         # On sauve X_train (features) + y_train (target réelle)
@@ -232,7 +237,7 @@ def train():
         mlflow.log_metric("mae", mae)
 
         mlflow.sklearn.log_model(model, "model")
-        print("   💾 Modèle sauvegardé !")
+        logger.info("   💾 Modèle sauvegardé !")
 
 if __name__ == "__main__":
     train()

@@ -10,6 +10,5 @@ TAG_CATEGORIES = {
     "Régime & Santé": ["Végétarien", "Végétalien", "Sans gluten", "Sans lactose", "Faible en calories"],
     "Cuisines du Monde": ["Française", "Italienne", "Asiatique", "Méditerranéenne", "Indienne", "Mexicaine", "Américaine"],
     "Saveurs": ["Épicé", "Sucré-salé", "Frais", "Réconfortant"],
-    "Ingrédients": ["Chocolat", "Fromage", "Fruits de mer", "Champignons", "Avocat"],
-    "Moment": ["Petit-déjeuner", "Déjeuner", "Dîner", "Apéro", "Snack"]
+    "Ingrédients": ["Chocolat", "Fromage", "Fruits de mer", "Champignons", "Avocat"]
 }

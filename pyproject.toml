@@ -20,6 +20,7 @@ python-multipart = "^0.0.9"
 
 # --- UI ---
 streamlit = "^1.32.0"
+slowapi = "^0.1.9"
 
 # --- AI & MLOPS ---
 # On force Numpy < 2 pour satisfaire MLflow 2.12

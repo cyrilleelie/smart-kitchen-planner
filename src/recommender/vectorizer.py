@@ -7,9 +7,14 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+import logging
+from src.utils.logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 def generate_recipe_embeddings():
-    print("🧠 Chargement du modèle NLP (Sentence-BERT)...")
+    logger.info("🧠 Chargement du modèle NLP (Sentence-BERT)...")
     model = SentenceTransformer('all-MiniLM-L6-v2')
     
     with Session(engine) as session:
@@ -17,9 +22,9 @@ def generate_recipe_embeddings():
         # On regarde la première recette brute pour voir comment Python voit le champ embedding
         sample = session.query(Recipe).first()
         if sample:
-            print(f"🕵️ [DEBUG] Recette '{sample.name}' (ID: {sample.id})")
-            print(f"   Valeur actuelle embedding (Python): {sample.embedding}")
-            print(f"   Type de la donnée: {type(sample.embedding)}")
+            logger.debug(f"🕵️ [DEBUG] Recette '{sample.name}' (ID: {sample.id})")
+            logger.debug(f"   Valeur actuelle embedding (Python): {sample.embedding}")
+            logger.debug(f"   Type de la donnée: {type(sample.embedding)}")
         
         # --- ÉTAPE 2 : SÉLECTION ---
         # On cherche ceux qui sont None (Python) ou liste vide
@@ -29,12 +34,12 @@ def generate_recipe_embeddings():
         print(f"👉 {total} recettes à traiter (NULL détectés).")
 
         if total == 0:
-            print("⚠️ Aucune recette détectée via le filtre ORM standard.")
-            print("🛑 FORCE UPDATE : On prend les 10 premières pour tester l'écriture.")
+            logger.warning("⚠️ Aucune recette détectée via le filtre ORM standard.")
+            logger.warning("🛑 FORCE UPDATE : On prend les 10 premières pour tester l'écriture.")
             recipes = session.query(Recipe).limit(10).all()
             total = len(recipes)
 
-        print(f"🔄 Démarrage de la vectorisation...")
+        logger.info(f"🔄 Démarrage de la vectorisation...")
         
         count = 0
         for recipe in recipes:
@@ -59,14 +64,15 @@ def generate_recipe_embeddings():
                 count += 1
                 if count % 10 == 0:
                     session.commit()
-                    print(f"   [{count}/{total}] Traité : {r_name[:30]}...")
+                    logger.info(f"   [{count}/{total}] Traité : {r_name[:30]}...")
             
             except Exception as e:
-                print(f"❌ Erreur ID {recipe.id}: {e}")
+                logger.error(f"❌ Erreur ID {recipe.id}: {e}")
                 continue
 
         session.commit()
-        print("✅ Terminé ! Base de données mise à jour.")
+        session.commit()
+        logger.info("✅ Terminé ! Base de données mise à jour.")
 
 if __name__ == "__main__":
     generate_recipe_embeddings()

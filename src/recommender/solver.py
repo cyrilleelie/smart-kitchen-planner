@@ -2,19 +2,63 @@ import random
 import json
 import numpy as np
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session
 from src.database.models import Recipe
+import logging
+from src.utils.logging_config import setup_logging
+import json
+from typing import Any
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 class MenuSolver:
+    """
+    Generate optimized meal plans based on user preferences and constraints.
+    
+    This solver combines performance-based recommendations (80%) with
+    discovery suggestions (20%) to create diverse and personalized meal
+    plans that respect user constraints (calories, preparation time, etc.).
+    
+    Attributes:
+        db (Session): SQLAlchemy database session
+        user_vector (list): User's preference vector (384 dimensions)
+        days (int): Number of days to plan (1-14)
+        cal_target (int): Daily calorie target
+        meals_per_day (int): Number of meals per day (usually 2: Lunch/Dinner)
+    """
+    
     def __init__(self, db: Session, user_vector: list, days: int, target_calories: int, meals_per_day: int):
+        """
+        Initialize the MenuSolver.
+
+        Args:
+            db: Active database session
+            user_vector: User embedding vector (list or numpy array)
+            days: Number of days to generate
+            target_calories: Calorie target per meal (approx)
+            meals_per_day: Number of meals to plan per day
+        """
         self.db = db
         self.user_vector = np.array(user_vector) if user_vector is not None and len(user_vector) > 0 else None
         self.days = days
-        self.target_calories = target_calories
+        self.cal_target = target_calories
         self.meals_per_day = meals_per_day
+        # Tolérance : on filtre ce qui est > 1.5x la cible (pour éviter les cheatmeals extrêmes)
         self.cal_max = target_calories * 1.5
 
-    def solve(self):
-        print(f"\n🔧 [SOLVER] Stratégie : Quantiles Dynamiques (Calibration Auto)")
+    def solve(self) -> list[dict[str, Any]]:
+        """
+        Execute the solver algorithm to generate the meal plan.
+
+        Returns:
+            List[Dict[str, Any]]: A list of menu items, each containing:
+                - day (int): Day number
+                - recipe_id (int): Recipe ID
+                - algo_type (str): 'PERF', 'DISCO', or 'RESCUE'
+                - score (float): Recommendation confidence score
+        """
+        logger.info(f"🔧 [SOLVER] Stratégie : Quantiles Dynamiques (Calibration Auto)")
         
         # 1. CHARGEMENT
         candidates = self.db.query(Recipe.id, Recipe.embedding, Recipe.calories).filter(
@@ -61,7 +105,7 @@ class MenuSolver:
             else:
                 item["type"] = "NEUTRAL" # Zone grise (40% - 80%) qu'on ignore pour trancher
         
-        print(f"📦 Buckets : {len(bucket_perf)} Perf | {len(bucket_disco)} Disco")
+        logger.info(f"📦 Buckets : {len(bucket_perf)} Perf | {len(bucket_disco)} Disco")
 
         # 4. SÉLECTION
         total_slots = self.days * self.meals_per_day
@@ -90,7 +134,7 @@ class MenuSolver:
 
         # C. Fallback (Si buckets vides, très rare avec les percentiles)
         if len(final_selection) < total_slots:
-            print("⚠️ Fallback activé (Buckets insuffisants)")
+            logger.warning("⚠️ Fallback activé (Buckets insuffisants)")
             remaining_pool = [x for x in scored_items if x["id"] not in used_ids]
             remaining_pool.sort(key=lambda x: x["score"], reverse=True) # On prend les meilleurs restants
             for item in remaining_pool:
@@ -102,9 +146,9 @@ class MenuSolver:
         random.shuffle(final_selection)
         menu = []
         
-        print("\n🕵️ [AUDIT MENU]")
-        print(f"{'Jour':<5} | {'ID':<6} | {'Score':<8} | {'Type':<8}")
-        print("-" * 35)
+        logger.info("\n🕵️ [AUDIT MENU]")
+        # print(f"{'Jour':<5} | {'ID':<6} | {'Score':<8} | {'Type':<8}")
+        # print("-" * 35)
         
         for i, item in enumerate(final_selection):
             day_num = (i // self.meals_per_day) + 1
@@ -117,15 +161,25 @@ class MenuSolver:
                 "score": item["score"]
             })
 
-            print(f"J{day_num:<4} | {item['id']:<6} | {item['score']:.4f}   | {item['type']:<8}")
-        print("-" * 35 + "\n")
+            # logger.debug(f"J{day_num:<4} | {item['id']:<6} | {item['score']:.4f}   | {item['type']:<8}")
+        # print("-" * 35 + "\n")
             
         return menu
 
     def calculate_score(self, recipe):
         return self._calculate_similarity(recipe.embedding)
 
-    def _calculate_similarity(self, embedding_data):
+    
+    def _calculate_similarity(self, embedding_data: str | list | np.ndarray) -> float:
+        """
+        Check cosine similarity between user vector and recipe embedding.
+
+        Args:
+            embedding_data: Recipe embedding (JSON string, list, or numpy array)
+
+        Returns:
+            float: Similarity score between 0.0 and 1.0. Returns 0.5 on error.
+        """
         if self.user_vector is None or embedding_data is None: return 0.5
         try:
             if isinstance(embedding_data, str):
@@ -138,5 +192,6 @@ class MenuSolver:
             dot = np.dot(self.user_vector, vec)
             sim = dot / (norm_u * norm_r)
             return (sim + 1) / 2
-        except:
+        except Exception as e:
+            logger.error(f"Error calculating similarity: {e}")
             return 0.5
