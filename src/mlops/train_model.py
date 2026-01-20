@@ -11,14 +11,24 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import mlflow
-import mlflow.sklearn
-import ast
-from dotenv import load_dotenv
+
 import logging
 from src.utils.logging_config import setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+try:
+    import surprise
+    from surprise import Dataset, Reader, SVD
+    from surprise.model_selection import train_test_split as surprise_train_test_split
+except ImportError:
+    surprise = None
+    Dataset = Reader = SVD = None
+    surprise_train_test_split = None
+    logger.warning(
+        "scikit-surprise is not installed; SVD pipeline will be unavailable."
+    )
 
 load_dotenv()
 
@@ -326,5 +336,51 @@ def train():
         logger.info("   💾 Modèle sauvegardé !")
 
 
+# New SVD training pipeline using scikit-surprise
+def train_svd():
+    logger.info("🚀 Démarrage de l'entraînement du modèle SVD (scikit-surprise)...")
+    with Session(engine) as session:
+        results = session.query(Interaction, Recipe).join(Recipe).all()
+        if not results:
+            logger.error("   ❌ Erreur : Pas de données pour SVD.")
+            return
+        data = []
+        for interaction, recipe in results:
+            data.append(
+                {
+                    "user_id": interaction.user_id,
+                    "recipe_id": recipe.id,
+                    "rating": interaction.rating,
+                }
+            )
+    df = pd.DataFrame(data)
+    reader = Reader(rating_scale=(1, 5))
+    surprise_data = Dataset.load_from_df(df[["user_id", "recipe_id", "rating"]], reader)
+    trainset, testset = surprise_train_test_split(
+        surprise_data, test_size=0.2, random_state=42
+    )
+    algo = SVD()
+    algo.fit(trainset)
+    predictions = algo.test(testset)
+    svd_rmse = surprise.accuracy.rmse(predictions, verbose=False)
+    logger.info(f"   ✅ SVD RMSE: {svd_rmse:.4f}")
+    os.makedirs(os.path.dirname("src/models/svd_model.pkl"), exist_ok=True)
+    surprise.dump.dump("src/models/svd_model.pkl", algo=algo)
+    logger.info("   💾 Modèle SVD sauvegardé !")
+
+
 if __name__ == "__main__":
-    train()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Train recommendation models")
+    parser.add_argument(
+        "--pipeline",
+        choices=["rf", "svd"],
+        default="rf",
+        help="Select which pipeline to train: rf (Random Forest) or svd (Surprise SVD)",
+    )
+    args = parser.parse_args()
+    if args.pipeline == "svd":
+        train_svd()
+    else:
+        train()

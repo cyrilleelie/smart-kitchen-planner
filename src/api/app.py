@@ -194,6 +194,7 @@ def get_contextual_recommendations(
     request: Request,
     context_request: ContextRequest = Body(...),
     db: Session = Depends(get_db),
+    model_type: str = "collaborative",
 ):
     """
     Get 5 contextual recipe recommendations based on AI model.
@@ -216,15 +217,27 @@ def get_contextual_recommendations(
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
 
-    # Instantiation du service avec la session DB
-    service = InferenceService(db)
+    # Use the new multi‑model recommendation service
+    from src.domain.recommendation_service import generate_recommendations
 
-    # Appel du service MLflow
-    recommendations = service.recommend(user_id=request.user_id, n=5)
+    # Build constraints dict from the request (example fields)
+    constraints = {}
+    if hasattr(context_request, "vegetarian"):
+        constraints["vegetarian"] = context_request.vegetarian
+    if hasattr(context_request, "max_time"):
+        constraints["max_time"] = context_request.max_time
+
+    # Generate recommendations using selected model type
+    recipes = generate_recommendations(
+        db=db,
+        user_id=context_request.user_id,
+        constraints=constraints,
+        top_n=5,
+        model_type=model_type,
+    )
 
     response = []
-    for item in recommendations:
-        recipe = item["recipe"]
+    for recipe in recipes:
         cals = 0.0
         try:
             if recipe.nutrition_info:
@@ -233,13 +246,12 @@ def get_contextual_recommendations(
         except Exception as e:
             logger.warning(f"Failed to parse nutrition_info in recommendation: {e}")
             pass
-
         response.append(
             RecipeRecommendation(
                 id=recipe.id,
                 name=recipe.name,
                 minutes=recipe.minutes,
-                score=round(item["score"], 2),
+                score=0.0,  # Score not directly available; could be added later
                 calories=cals,
             )
         )
