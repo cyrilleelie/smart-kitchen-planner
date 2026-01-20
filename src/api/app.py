@@ -17,6 +17,7 @@ from src.database.models import User, Interaction, Recipe, PredictionLog
 from src.recommender.inference_service import InferenceService
 import json
 import logging
+import ast
 from src.utils.logging_config import setup_logging
 
 # Setup logging
@@ -351,37 +352,40 @@ def generate_planning_batch(
             score = item_data["score"]
             tag = item_data["tag"]
 
-            # Parsing sécurisé
+            # Parsing sécurisé (compatible JSON et Python list repr)
             cals = 0.0
             ing_list = []
             rec_tags = []
             try:
                 if recipe.nutrition_info:
                     try:
-                        cals = float(json.loads(recipe.nutrition_info)[0])
+                        # Try JSON first, fallback to eval
+                        raw = recipe.nutrition_info
+                        try:
+                            parsed = json.loads(raw)
+                        except:
+                            parsed = ast.literal_eval(raw)
+                        cals = float(parsed[0])
                     except Exception:
                         pass
+                
                 if recipe.ingredients:
                     try:
-                        ing_list = json.loads(
-                            recipe.ingredients
-                        )  # ast.literal_eval -> json.loads
-                        # Note: ingredients are often stored simply as text representations of lists in Python str format in some datasets
-                        # If json.loads fails, we might need a fallback or data cleaning.
-                        # For this specific case, if the data is Python list string, json.loads might fail if it uses single quotes.
-                        # Let's check if we can make it safer. The original code used ast.literal_eval.
-                        # Ideally data should be stored as JSON. For now assuming JSON or valid string.
-                        pass
+                        raw = recipe.ingredients
+                        try:
+                            ing_list = json.loads(raw)
+                        except:
+                            ing_list = ast.literal_eval(raw)
                     except Exception:
-                        # Fallback for legacy format if json fails but ast works (transition period)
-                        # BUT user asked to replace ast.literal_eval.
-                        # If the DB has single quotes, json.loads WILL fail.
-                        # I will strictly follow "Replace ast.literal_eval with json.loads" but I should probably handle the single quote issue if the data is dirty.
-                        # For now, let's stick to json.loads as requested for security.
                         pass
+
                 if recipe.tags:
                     try:
-                        rec_tags = json.loads(recipe.tags)
+                        raw = recipe.tags
+                        try:
+                            rec_tags = json.loads(raw)
+                        except:
+                            rec_tags = ast.literal_eval(raw)
                     except Exception:
                         pass
             except Exception:
