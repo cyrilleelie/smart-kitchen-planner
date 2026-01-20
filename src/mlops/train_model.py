@@ -1,22 +1,30 @@
 import sys
 import os
-
-sys.path.append(os.getcwd())
+import ast
+import random
+import logging
+from dotenv import load_dotenv
 
 import pandas as pd
 import numpy as np
-import random
+import mlflow
+import mlflow.sklearn
 from sqlalchemy.orm import Session
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-import mlflow
 
-import logging
+# Add current working directory to sys.path to allow local imports
+sys.path.append(os.getcwd())
+
 from src.utils.logging_config import setup_logging
+from src.database.connection import engine  # noqa: E402
+from src.database.models import Interaction, Recipe  # noqa: E402
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 try:
     import surprise
@@ -29,12 +37,6 @@ except ImportError:
     logger.warning(
         "scikit-surprise is not installed; SVD pipeline will be unavailable."
     )
-
-load_dotenv()
-
-
-from src.database.connection import engine  # noqa: E402
-from src.database.models import Interaction, Recipe  # noqa: E402
 
 # --- CONFIGURATION MLOPS ---
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
@@ -359,14 +361,29 @@ def train_svd():
     trainset, testset = surprise_train_test_split(
         surprise_data, test_size=0.2, random_state=42
     )
-    algo = SVD()
-    algo.fit(trainset)
-    predictions = algo.test(testset)
-    svd_rmse = surprise.accuracy.rmse(predictions, verbose=False)
-    logger.info(f"   ✅ SVD RMSE: {svd_rmse:.4f}")
-    os.makedirs(os.path.dirname("src/models/svd_model.pkl"), exist_ok=True)
-    surprise.dump.dump("src/models/svd_model.pkl", algo=algo)
-    logger.info("   💾 Modèle SVD sauvegardé !")
+    print(f"   📡 Connexion à MLflow ({MLFLOW_URI})...")
+    mlflow.set_tracking_uri(MLFLOW_URI)
+    mlflow.set_experiment(EXPERIMENT_NAME)
+
+    with mlflow.start_run(run_name="SVD_Collaborative_Filtering"):
+        algo = SVD()
+        # Log default params for SVD as they are not explicitly set
+        params = {"n_factors": 100, "n_epochs": 20, "lr_all": 0.005, "reg_all": 0.02}
+        mlflow.log_params(params)
+
+        algo.fit(trainset)
+        predictions = algo.test(testset)
+        svd_rmse = surprise.accuracy.rmse(predictions, verbose=False)
+
+        logger.info(f"   ✅ SVD RMSE: {svd_rmse:.4f}")
+        mlflow.log_metric("rmse", svd_rmse)
+
+        os.makedirs(os.path.dirname("src/models/svd_model.pkl"), exist_ok=True)
+        surprise.dump.dump("src/models/svd_model.pkl", algo=algo)
+        logger.info("   💾 Modèle SVD sauvegardé !")
+
+        # Log model file as artifact because surprise is not directly supported by mlflow.sklearn
+        mlflow.log_artifact("src/models/svd_model.pkl", artifact_path="model")
 
 
 if __name__ == "__main__":
