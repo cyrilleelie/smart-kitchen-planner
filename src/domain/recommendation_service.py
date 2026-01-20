@@ -261,6 +261,15 @@ def generate_weekly_plan(
             "tag": None
         })
         
+    # If using collaborative filtering, return purely the top recommendations (Performance)
+    # as requested by the user.
+    if model_type == "collaborative":
+        final_selection = []
+        for item in all_results[:n_days]:
+            item["tag"] = "SVD"  # Or keep None, or "Collaborative"
+            final_selection.append(item)
+        return final_selection
+
     n_perf = max(1, int(n_days * 0.8))
     n_disco = n_days - n_perf
     
