@@ -1,0 +1,56 @@
+name: CI Smart Retail
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+
+jobs:
+  quality-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1. Récupération du code
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. Installation de Python
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    # 3. Installation de Poetry
+    - name: Install Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    # 4. Cache des dépendances (Optimisation)
+    - name: Cache Poetry dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pypoetry
+        key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-poetry-
+
+    # 5. Installation des dépendances
+    - name: Install dependencies
+      run: poetry install --no-interaction --no-root
+
+    # 6. Vérification du formatage (Black)
+    # L'option --check ne modifie pas le code, elle échoue si ce n'est pas conforme.
+    - name: Check Code Formatting (Black)
+      run: poetry run black --check .
+
+    # 7. Analyse statique / Linting (Ruff)
+    # Vérifie les bugs potentiels et le respect des standards
+    - name: Lint Code (Ruff)
+      run: poetry run ruff check .
+
+    # 8. Lancement des Tests avec rapport de couverture
+    - name: Run Tests with Coverage
+      run: |
+        poetry run pytest --cov=src tests/ --cov-fail-under=70

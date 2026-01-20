@@ -9,13 +9,19 @@ poetry.lock
 
 # Ignorer les gros fichiers de données
 *.csv
-data/
 raw_recipes.csv
 
 # Ignorer la Base de Données
-*.db
-*.sqlite3
-smartretail.db
+
+
+# Ignore les artefacts de ML
+mlruns/
+mlruns_old/
+reports/
+*.pkl
+*.joblib
+*.h5
+catalogue-*.whl
 
 # Environment variables
 .env
@@ -26,3 +32,10 @@ smartretail.db
 
 # OS
 .DS_Store
+
+# Logs
+*.log
+
+# Coverage
+.coverage
+htmlcov/

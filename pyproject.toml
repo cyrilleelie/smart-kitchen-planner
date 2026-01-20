@@ -1,31 +1,77 @@
-[project]
-name = "smartretail-recsys"
+[tool.poetry]
+name = "smartretail"
 version = "0.1.0"
-description = "Moteur de recommandation et planification de menus"
-authors = [
-    {name = "Cyrille ELIE",email = "cyrille.elie@gmail.com"}
-]
+description = "AI Powered Kitchen Assistant"
+authors = ["Cyril"]
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "pandas (>=2.3.3,<3.0.0)",
-    "numpy (>=2.3.5,<3.0.0)",
-    "sqlalchemy (>=2.0.45,<3.0.0)",
-    "ortools (>=9.14.6206,<10.0.0)",
-    "fastapi (>=0.125.0,<0.126.0)",
-    "uvicorn (>=0.38.0,<0.39.0)",
-    "sentence-transformers (>=5.2.0,<6.0.0)",
-    "streamlit (>=1.52.2,<2.0.0)",
-    "requests (>=2.32.5,<3.0.0)"
-]
+package-mode = false
 
+[tool.poetry.dependencies]
+python = "^3.12"
+
+# --- CORE APP ---
+fastapi = "^0.110.0"
+uvicorn = "^0.29.0"
+sqlalchemy = "^2.0.29"
+psycopg2-binary = "^2.9.9"
+pgvector = "^0.2.5"
+requests = "^2.31.0"
+python-multipart = "^0.0.9"
+
+# --- UI ---
+streamlit = "^1.32.0"
+slowapi = "^0.1.9"
+
+# --- AI & MLOPS ---
+# On force Numpy < 2 pour satisfaire MLflow 2.12
+numpy = "<2.0.0"
+
+# NLP Frameworks
+sentence-transformers = "^2.6.0"
+spacy = "^3.7.4"  # <--- AJOUTÉ ICI POUR CORRIGER L'ERREUR
+
+# MLflow 2.12.1 (Version stable Docker)
+mlflow = "2.12.1"
+
+# OR-Tools 9.9 (Compatible avec le vieux Protobuf de MLflow)
+ortools = "9.9.3963"
+
+# Monitoring de drift
+evidently = "^0.4.0"
+
+# Data Science Standard
+pandas = "^2.2.0"
+scikit-learn = "^1.4.0"
+xgboost = "^3.1.3"
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
 [dependency-groups]
 dev = [
-    "ipykernel (>=7.1.0,<8.0.0)",
-    "pytest (>=9.0.2,<10.0.0)"
+    "pytest (>=9.0.2,<10.0.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)",
+    "black (>=25.12.0,<26.0.0)",
+    "isort (>=7.0.0,<8.0.0)",
+    "flake8 (>=7.3.0,<8.0.0)",
+    "ruff (>=0.14.11,<0.15.0)"
+]
+
+[tool.pytest.ini_options]
+addopts = "--cov=src"
+testpaths = ["tests"]
+filterwarnings = [
+    # Ignore les warnings liés à MLflow et Pydantic V1
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+    "ignore:.*Pydantic V1 style.*:DeprecationWarning",
+    
+    # Ignore les warnings de Google Protobuf (utilisé par MLflow)
+    "ignore:.*google.protobuf.service module is deprecated.*:UserWarning",
+    "ignore:.*pkg_resources is deprecated.*:UserWarning",
+    
+    # Ignore le warning de rechargement Numpy/Pandas
+    "ignore:.*The NumPy module was reloaded.*:UserWarning",
+    
+    # Ignore les warnings de dateutils (souvent liés à Pandas)
+    "ignore:.*dateutil.*:DeprecationWarning"
 ]

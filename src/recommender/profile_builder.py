@@ -1,80 +1,169 @@
+import json
 import numpy as np
-from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
-from sklearn.metrics.pairwise import cosine_similarity
+from sqlalchemy import or_
 from src.database.models import User, Interaction, Recipe
+import logging
+from typing import Any
+
+# IMPORT DEPUIS LES UTILS (C'est beaucoup plus propre)
+from src.utils.translations import PREFERENCE_TAGS_MAP
+
+logger = logging.getLogger(__name__)
+
 
 class UserProfiler:
-    def __init__(self, session: Session):
-        self.session = session
+    """
+    Builds a weighted user profile vector from explicit preferences and implicit interactions.
 
-    def get_user_vector(self, user_id: int, use_decay=True):
+    Attributes:
+        db (Session): SQLAlchemy database session
+    """
+
+    def __init__(self, db: Session):
         """
-        Calcule le vecteur de goût.
-        :param use_decay: Si True, applique une pondération temporelle (Les likes récents comptent plus).
+        Initialize the UserProfiler.
+
+        Args:
+            db: Active database session
         """
-        # 1. On récupère TOUT l'historique positif (Note >= 3)
-        # Note : On ignore les notes 1 et 2 (les rejets), car ils ne constituent pas un goût
-        interactions = self.session.query(Interaction).filter(
-            Interaction.user_id == user_id,
-            Interaction.rating >= 3
-        ).order_by(desc(Interaction.timestamp)).all()
+        self.db = db
 
-        if not interactions:
-            return None
+    def get_converted_tags(self, raw_tags: list[str]) -> list[str]:
+        """
+        Convert raw UI tags (French) to internal tags (English).
 
+        Args:
+            raw_tags: List of tags in French (e.g. ['Véxétarien'])
+
+        Returns:
+            List[str]: List of corresponding English tags (e.g. ['vegetarian']).
+        """
+        # On nettoie et on mappe
+        clean_tags = []
+        for tag in raw_tags:
+            t = tag.strip()
+            if t in PREFERENCE_TAGS_MAP:
+                clean_tags.append(PREFERENCE_TAGS_MAP[t])
+        return clean_tags
+
+    def get_weighted_profile(
+        self, user_id: int, request_tags: list[str] = None
+    ) -> np.ndarray | None:
+        """
+        Compute the weighted average vector for a user.
+
+        Combines:
+        1. Explicit Preference Vectors (from tags) - weighted x3
+        2. Implicit Interaction Vectors (from liked recipes) - weighted x1
+
+        Args:
+            user_id: ID of the user
+            request_tags: List of explicit preference tags (French)
+
+        Returns:
+            np.ndarray | None: The 384-dimensional user vector, or None if Cold Start.
+        """
         vectors = []
-        weights = []
-        
-        # Date de référence (maintenant)
-        now = datetime.now()
 
-        for interaction in interactions:
-            if interaction.recipe.embedding:
-                vec = np.array(interaction.recipe.embedding)
-                vectors.append(vec)
-                
-                if use_decay:
-                    # Formule de décroissance : 1 / (1 + jours_écoulés)
-                    # Hier = 1.0, Il y a 30 jours = 0.03
-                    days_diff = (now - interaction.timestamp).days
-                    # On ajoute un petit epsilon pour éviter la division par zéro si c'est aujourd'hui
-                    weight = 1 / (max(days_diff, 0) + 1)
-                    weights.append(weight)
+        # --- A. RÉCUPÉRATION ET TRADUCTION ---
+        # 1. Préférences stockées
+        user = self.db.query(User).filter(User.id == user_id).first()
+        stored_prefs = user.preferences if user and user.preferences else []
+
+        # 2. Préférences de la requête
+        current_request = request_tags if request_tags else []
+
+        # 3. Fusion et Traduction
+        raw_tags_combined = list(set(stored_prefs + current_request))
+        active_tags = self.get_converted_tags(raw_tags_combined)
+
+        if active_tags:
+            logger.info(
+                f"👤 [PROFILER] Tags actifs (EN) pour User {user_id}: {active_tags}"
+            )
+
+        # --- B. VECTEURS D'INTENTION (Tags) ---
+        if active_tags:
+            for tag in active_tags:
+                # Recherche élargie (Tags OU Titre)
+                sample_recipes = (
+                    self.db.query(Recipe)
+                    .filter(
+                        or_(
+                            Recipe.tags.ilike(f"%{tag}%"), Recipe.name.ilike(f"%{tag}%")
+                        )
+                    )
+                    .filter(Recipe.embedding is not None)
+                    .limit(15)
+                    .all()
+                )
+
+                if sample_recipes:
+                    tag_vectors = [
+                        self._parse_embedding(r.embedding) for r in sample_recipes
+                    ]
+                    # Filter out empty lists from parsing errors
+                    tag_vectors = [vec for vec in tag_vectors if vec]
+                    if tag_vectors:
+                        avg_tag_vec = np.mean(tag_vectors, axis=0)
+                        # Poids fort (x3)
+                        vectors.extend([avg_tag_vec] * 3)
                 else:
-                    weights.append(1.0)
-        
+                    logger.warning(f"   ⚠️ Tag '{tag}' ignoré (aucune recette trouvée).")
+
+        # --- C. VECTEUR HISTORIQUE (Interactions) ---
+        interactions = (
+            self.db.query(Interaction)
+            .filter(Interaction.user_id == user_id, Interaction.rating >= 4)
+            .all()
+        )
+
+        count_interactions = 0
+        for interaction in interactions:
+            if interaction.recipe and interaction.recipe.embedding:
+                try:
+                    vec = self._parse_embedding(interaction.recipe.embedding)
+                    if vec:  # Ensure embedding was successfully parsed
+                        vectors.append(vec)
+                        count_interactions += 1
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to parse embedding for recipe {interaction.recipe.id}: {e}"
+                    )
+                    continue
+
+        if count_interactions > 0:
+            logger.info(
+                f"   ⭐ [PROFILER] {count_interactions} recettes aimées intégrées."
+            )
+
+        # --- D. FUSION FINALE ---
         if not vectors:
+            # Fallback : si on a vraiment rien, on ne plante pas, on renvoie None
+            # Le Solver basculera en mode "Aléatoire" ou "Populaire"
             return None
 
-        # 2. Moyenne Pondérée (Weighted Average)
-        # C'est ici que la magie opère : les vieux vecteurs "viande" sont écrasés par les récents
-        user_vector = np.average(vectors, axis=0, weights=weights if use_decay else None)
-        return user_vector
+        # Moyenne pondérée
+        final_vector = np.mean(vectors, axis=0)
+        return final_vector.astype(np.float32)
 
-    def recommend_candidates(self, user_id: int, limit=100, use_decay=True):
-        """Génère les candidats basés sur le profil à jour"""
-        user_vector = self.get_user_vector(user_id, use_decay=use_decay)
-        
-        if user_vector is None:
-            # Fallback : Populaire ou Random
-            return self.session.query(Recipe).limit(limit).all(), [0.5]*limit
+    def _parse_embedding(self, embedding_field: str | list | None) -> list | Any:
+        """
+        Parse embedding field safely.
 
-        # Récupération de toutes les recettes vectorisées
-        all_recipes = self.session.query(Recipe).filter(Recipe.embedding != None).all()
-        recipe_vectors = np.array([np.array(r.embedding) for r in all_recipes])
-        
-        # Similarité
-        similarities = cosine_similarity(user_vector.reshape(1, -1), recipe_vectors)[0]
-        
-        # Tri
-        top_indices = np.argsort(similarities)[::-1][:limit]
-        
-        candidates = []
-        scores = []
-        for idx in top_indices:
-            candidates.append(all_recipes[idx])
-            scores.append(similarities[idx] * 100)
-            
-        return candidates, scores
+        Args:
+            embedding_field: Raw embedding data from DB (str or list)
+
+        Returns:
+            list: Parsed embedding list or empty list if failure.
+        """
+        if embedding_field is None:
+            return []
+        if isinstance(embedding_field, str):
+            try:
+                return json.loads(embedding_field)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid JSON for embedding: {embedding_field[:50]}...")
+                return []
+        return embedding_field

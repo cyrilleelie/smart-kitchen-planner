@@ -1,0 +1,72 @@
+{
+    "username": "Lazy_Student",
+    "preferences": [
+        "easy",
+        "pasta",
+        "pizza",
+        "15-minutes-or-less"
+    ],
+    "interaction_count": 450,
+    "behavior_rules": {
+        "likes": {
+            "keywords": [
+                "easy",
+                "simple",
+                "fast",
+                "quick",
+                "15-minutes",
+                "30-minutes",
+                "pasta",
+                "noodle",
+                "ramen",
+                "pizza",
+                "sandwich",
+                "toast",
+                "microwave",
+                "cheese",
+                "macaroni"
+            ],
+            "rating_dist": [
+                4.0,
+                5.0
+            ],
+            "weights": [
+                0.5,
+                0.5
+            ]
+        },
+        "dislikes": {
+            "keywords": [
+                "roast",
+                "stew",
+                "marinated",
+                "slow cooker",
+                "hours",
+                "complex",
+                "skill",
+                "gourmet",
+                "fancy",
+                "expensive",
+                "lobster",
+                "truffle",
+                "preparation"
+            ],
+            "rating_dist": [
+                1.0,
+                2.0
+            ],
+            "weights": [
+                0.6,
+                0.4
+            ]
+        },
+        "neutral": {
+            "rating_dist": [
+                3.0
+            ],
+            "weights": [
+                1.0
+            ]
+        }
+    }
+}

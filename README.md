@@ -1,168 +1,240 @@
-# 🥗 SmartRetail RecSys: AI-Powered Meal Planner
+# 🥗 Smart Kitchen Planner
 
-> **An End-to-End AI Engineering Project:** From Semantic Search to Constraint Optimization and MLOps.
+[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](https://www.docker.com/)
+[![MLflow](https://img.shields.io/badge/MLflow-2.12-red.svg)](https://mlflow.org/)
+[![Tests](https://img.shields.io/badge/Tests-32%20passed-success.svg)]()
 
-**SmartRetail RecSys** is an intelligent menu generation engine. Unlike standard recommenders that suggest isolated items, this system builds coherent **weekly meal plans** that respect strict nutritional and logistical constraints (Calories, Prep Time, Diversity).
+**Smart Kitchen Planner** est un assistant culinaire intelligent qui génère des plannings de repas hebdomadaires ultra-personnalisés en combinant **Machine Learning** et **optimisation algorithmique**.
 
-It combines **NLP (Sentence-BERT)** to understand user tastes and **Operations Research (Google OR-Tools)** to solve the scheduling puzzle.
+---
+
+## ✨ Fonctionnalités Clés
+
+| Fonctionnalité | Description |
+|----------------|-------------|
+| 🧠 **Recommandations IA** | Modèle Random Forest entraîné sur les interactions utilisateurs |
+| 🔍 **Recherche Sémantique** | Embeddings Sentence-BERT (384 dimensions) pour comprendre le sens des recettes |
+| ⚖️ **Contraintes Nutritionnelles** | Respect des cibles caloriques et du temps de préparation |
+| 📊 **MLOps Intégré** | Suivi des expériences avec MLflow, détection du drift avec Evidently |
+| 🛡️ **Sécurité API** | Rate Limiting (slowapi), CORS configuré, paramètres externalisés |
 
 ---
 
 ## 🏗️ Architecture
 
-The system follows a modular "Lakehouse" architecture, separating the Intelligence (AI) from the Logic (Solver) and the Service (API).
-
-```mermaid
-graph TD
-    User((User)) -->|Preferences| API[FastAPI Backend]
-    
-    subgraph "Core Engine"
-        DB[(SQLite DB)] -->|Raw Recipes| Vectorizer[Sentence-BERT]
-        Vectorizer -->|Embeddings| VectorDB[(Vector Store)]
-        
-        VectorDB -->|Semantic Search| Recommender[Profile Builder]
-        Recommender -->|Top 200 Candidates| Solver[OR-Tools Solver]
-        
-        Solver -->|Constraint Optimization| Plan[Weekly Menu]
-    end
-    
-    subgraph "MLOps Pipeline"
-        Simulator[Drift Simulator] -->|Inject New Behavior| DB
-        Monitor[Health Check] -->|Detect Rating Drop| Alert
-        Alert -->|Trigger| Retrainer[Weight Decay Retraining]
-    end
-
-    Plan --> API
-    API --> UI[Streamlit Dashboard]
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Docker Network                           │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐         │
+│  │  Streamlit  │───▶│   FastAPI   │◀──▶│ PostgreSQL  │         │
+│  │   (8501)    │    │   (8000)    │    │   (5433)    │         │
+│  └─────────────┘    └──────┬──────┘    └─────────────┘         │
+│                            │                                    │
+│                     ┌──────▼──────┐                            │
+│                     │   MLflow    │                            │
+│                     │   (5000)    │                            │
+│                     └─────────────┘                            │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## ✨ Key Features
+### Services
 
-### 1. 🧠 Semantic Recommendation (The Brain)
-Instead of matching keywords, the system uses **Sentence-Transformers (`all-MiniLM-L6-v2`)** to vectorize recipe descriptions.
-* *Benefit:* It understands that "Tofu" and "Tempeh" are semantically close, even if the words differ.
-* *Technique:* Cosine Similarity on 384-dimensional dense vectors.
-
-### 2. 🧩 Constraint Solving (The Logic)
-Recommending high-score items is easy. Building a valid schedule is hard.
-We use **Google OR-Tools** (CP-SAT) to enforce:
-* **Hard Constraints:** Max prep time (e.g., < 30min), Calorie range (400-900 kcal).
-* **Logic Constraints:** No "Desserts" as main courses.
-* **Diversity:** Never repeat the same recipe in a week.
-
-### 3. 🔄 MLOps & Drift Management
-A simulation of **Concept Drift** (e.g., a user becoming Vegetarian) demonstrates the system's resilience.
-* **Monitor:** Tracks rolling average satisfaction.
-* **Retrainer:** Applies a **Time-Decay** function to user embeddings, prioritizing recent interactions over historical data to pivot recommendations dynamically.
+| Service | Port | Technologie | Rôle |
+|---------|------|-------------|------|
+| `db` | 5433 | PostgreSQL 15 + PGVector | Stockage des recettes, utilisateurs, embeddings |
+| `app` | 8000, 8501 | FastAPI + Streamlit | API REST + Interface utilisateur |
+| `mlflow` | 5000 | MLflow | Tracking des expériences ML |
 
 ---
 
-## 🛠️ Tech Stack
+## ⚙️ Configuration
 
-* **Language:** Python 3.12
-* **Dependency Manager:** Poetry
-* **AI/NLP:** `sentence-transformers`, `scikit-learn`, `numpy`
-* **Optimization:** `ortools`
-* **Backend:** `fastapi`, `uvicorn`, `sqlalchemy`
-* **Frontend:** `streamlit`
-* **Database:** SQLite (SQLAlchemy ORM)
+### Variables d'Environnement
+
+1. Copier le fichier template :
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Configurer les valeurs :
+   ```env
+   # Database
+   POSTGRES_USER=user
+   POSTGRES_PASSWORD=your_secure_password
+   POSTGRES_DB=smartretail
+   
+   # API Security
+   ALLOWED_ORIGINS=http://localhost:8501
+   ```
+
+> ⚠️ **IMPORTANT** : Ne jamais commiter le fichier `.env` (déjà dans `.gitignore`)
 
 ---
 
-## 🚀 Getting Started
+## � Installation
 
-### 1. Installation
+### Prérequis
+- Docker & Docker Compose
+- Git
+
+### Démarrage Rapide
+
 ```bash
-# Clone repository
-git clone https://github.com/cyrilleelie/smartretail-recsys.git
+# 1. Cloner le projet
+git clone https://github.com/cyrilleelie/smartretail-recsys
 cd smartretail-recsys
 
-# Install dependencies with Poetry
-poetry install
+# 2. Configurer l'environnement
+cp .env.example .env
+
+# 3. Lancer la stack
+docker-compose up --build -d
+
+# 4. Vérifier les services
+docker-compose ps
 ```
 
-### 2. Data Setup (Crucial Step)
-Since raw data is not hosted on GitHub (file size limit), you need to download it manually:
-1.  Create the data directory:
-    ```bash
-    mkdir -p data/raw
-    ```
-2.  Download the **Food.com Recipes Dataset** (specifically `RAW_recipes.csv`) from Kaggle:
-    * [Link to Dataset](https://www.kaggle.com/datasets/shuyangli94/food-com-recipes-and-user-interactions)
-3.  Place the file at: `data/raw/RAW_recipes.csv`
+### Initialisation des Données
 
-### 3. Initialization
-Once the CSV is in place, run the initialization scripts to generate the SQL Database and Vector Embeddings.
 ```bash
-# 1. Ingest CSV into SQLite
-poetry run python -m src.database.init_db
+# Créer les tables, charger les recettes et générer les embeddings
+docker-compose exec app python src/scripts/init_db.py
 
-# 2. Simulate User History (Cold Start)
-poetry run python -m src.simulation.user_simulator
+# Charger des recettes supplémentaires (batch de 1000 par défaut) et générer les embeddings
+docker-compose exec app python src/scripts/load_recipes.py --count 1000
 
-# 3. Generate NLP Embeddings (this takes ~1-2 mins)
-poetry run python -m src.recommender.vectorizer
+# Charger un utilisateur avec un profil prédéfini (persona) et génère des interactions en fonction du profil (nombre en paramètre dans le fichier json)
+# Exemples de personas disponibles dans data/personas/
+docker-compose exec app python src/scripts/inject_persona.py data/personas/sportif.json
+
+# Ajouter des interactions supplémentaires à un utilisateur existant
+# Arguments : <username> <nombre> <chemin_persona>
+docker-compose exec app python src/scripts/add_interactions.py Captain_Nemo 50 data/personas/captain_nemo.json
+
+# Réinitialiser un persona (Pour supprimer un user et toutes ses interactions)
+docker-compose exec app python src/scripts/reset_persona.py Captain_Nemo
+
 ```
 
-### 4. Running the App
-Launch the API and the Dashboard in two separate terminals.
+### Accès aux Interfaces
 
-**Terminal 1 (Backend):**
-```bash
-poetry run uvicorn src.api.app:app --reload
-```
-
-**Terminal 2 (Frontend):**
-```bash
-poetry run streamlit run src/ui/dashboard.py
-```
-
-Access the dashboard at: `http://localhost:8501`
+| Interface | URL |
+|-----------|-----|
+| 🖥️ Frontend Streamlit | http://localhost:8501 |
+| 📚 API Documentation | http://localhost:8000/docs |
+| 📊 MLflow Dashboard | http://localhost:5000 |
 
 ---
 
-## 📉 MLOps Scenario: The "Vegetarian Shift"
+## 📡 API Endpoints
 
-This project includes a script to simulate **Concept Drift**.
-
-1.  **Run the Monitor:** Check current health.
-    ```bash
-    poetry run python -m src.mlops.monitor
-    # Output: ✅ Model is healthy.
-    ```
-
-2.  **Simulate Drift:** Inject interactions where the user rejects meat and likes vegetables.
-    ```bash
-    poetry run python -m src.mlops.drift_simulator
-    # Output: 🚨 20 new interactions injected (User became vegetarian).
-    ```
-
-3.  **Detect & Repair:** Run the retraining pipeline.
-    ```bash
-    poetry run python -m src.mlops.retrain
-    # Output: ✅ Profile successfully pivoted. New recommendations: "Carrot Salad", "Tofu Stir-fry".
-    ```
+| Méthode | Endpoint | Description | Rate Limit |
+|---------|----------|-------------|------------|
+| `POST` | `/recommend` | Recommandations contextuelles (ML) | 30/min |
+| `POST` | `/generate-planning` | Planning avec stratégie Batch & Split | 10/min |
+| `PUT` | `/user/{id}/preferences` | Met à jour les préférences | 50/min |
+| `POST` | `/feedback` | Enregistre une note utilisateur | - |
+| `GET` | `/explore` | Découvrir de nouvelles recettes | - |
 
 ---
 
-## 📂 Project Structure
+## 🧪 Tests
 
-```text
-smartretail-recsys/
+```bash
+# Exécuter les tests avec couverture
+docker-compose exec app pytest tests/ -v --cov=src
+
+# Ou localement avec le venv
+.venv/Scripts/python.exe -m pytest tests/ -v --cov=src
+```
+
+**Couverture actuelle :** ~85% (32 tests)
+
+---
+
+## 📂 Structure du Projet
+
+```
 ├── src/
-│   ├── api/             # FastAPI endpoints & Pydantic schemas
-│   ├── database/        # SQL Models & Data Init
-│   ├── mlops/           # Drift Simulation & Retraining Logic
-│   ├── optimization/    # OR-Tools Solver (The Constraints Engine)
-│   ├── recommender/     # Sentence-BERT Vectorizer & Profiler
-│   ├── simulation/      # User interaction generator
-│   ├── ui/              # Streamlit Dashboard
-│   └── main.py          # CLI entry point
-├── poetry.lock
-├── pyproject.toml
-└── README.md
+│   ├── api/                 # API FastAPI
+│   │   ├── app.py           # Routes et endpoints
+│   │   └── schemas.py       # Modèles Pydantic
+│   ├── database/            # Couche de persistance
+│   │   ├── models.py        # Modèles SQLAlchemy
+│   │   └── connection.py    # Gestion des sessions
+│   ├── recommender/         # Moteur de recommandation
+│   │   ├── inference_service.py  # Inférence ML (MLflow)
+│   │   ├── solver.py        # Algorithme de planification
+│   │   ├── profile_builder.py    # Construction profil utilisateur
+│   │   └── vectorizer.py    # Génération embeddings
+│   ├── mlops/               # Outils MLOps
+│   │   ├── train_model.py   # Entraînement du modèle
+│   │   └── monitor_drift.py # Détection du drift (Evidently)
+│   ├── ui/                  # Frontend Streamlit
+│   └── utils/               # Utilitaires (logging, traductions)
+├── tests/                   # Tests unitaires
+├── docker-compose.yml       # Orchestration des services
+├── Dockerfile               # Image Python
+└── pyproject.toml           # Dépendances Poetry
 ```
 
-## 👤 Author
+---
 
-**Cyrille ELIE** - AI Engineer Portfolio Project.
+## �️ Commandes Utiles
+
+```bash
+# Logs en temps réel
+docker-compose logs -f app
+
+# Redémarrer un service
+docker-compose restart app
+
+# Arrêter la stack
+docker-compose down
+
+# Entraîner le modèle ML
+docker-compose exec app python src/mlops/train_model.py
+
+# Vérifier le drift des données
+docker-compose exec app python src/mlops/monitor_drift.py
+
+# Orchestrateur MLOps (vérifie le drift et réentraîne si nécessaire)
+docker-compose exec app python src/mlops/orchestrator.py
+```
+
+---
+
+## 🔐 Sécurité
+
+- ✅ **Secrets externalisés** : Pas de credentials dans le code
+- ✅ **Rate Limiting** : Protection contre les abus (slowapi)
+- ✅ **CORS configuré** : Origines autorisées contrôlées
+- ✅ **Logging structuré** : Traçabilité des erreurs
+
+---
+
+## 📈 MLOps
+
+Le projet intègre un pipeline MLOps complet :
+
+1. **Entraînement** : Random Forest sur interactions contextuelles
+2. **Tracking** : Paramètres, métriques (RMSE, MAE) et artefacts dans MLflow
+3. **Inférence** : Chargement automatique du dernier modèle
+4. **Monitoring** : Détection du drift avec Evidently (KS-test)
+
+---
+
+## 🤝 Contribution
+
+1. Créer une branche : `git checkout -b feature/ma-feature`
+2. Commiter : `git commit -m "✨ feat: Ma nouvelle feature"`
+3. Pousser : `git push origin feature/ma-feature`
+4. Ouvrir une Pull Request
+
+---
+
+## 📄 Licence
+
+MIT License - Voir [LICENSE](LICENSE) pour plus de détails.
