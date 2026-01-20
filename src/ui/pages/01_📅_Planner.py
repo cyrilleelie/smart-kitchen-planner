@@ -99,9 +99,16 @@ def main():
 
     # --- LOGIQUE ---
     if generate_btn:
-        # ... (keep existing checks)
+        if not selected_meal_labels:
+            st.error("Veuillez sélectionner au moins un type de repas.")
+            return
 
-        # ...
+        # Conversion des choix en codes (0, 1, 2, 3)
+        selected_meal_codes = [MEAL_TYPES[label] for label in selected_meal_labels]
+        # On trie pour que l'affichage soit logique (Matin avant Soir)
+        selected_meal_codes.sort()
+
+        season_code = SEASONS[season_label]
 
         with st.spinner("🤖 L'IA compose votre semaine sur mesure..."):
             try:
