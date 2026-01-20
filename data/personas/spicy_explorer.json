@@ -1,0 +1,68 @@
+{
+    "username": "Pepe_Chili",
+    "preferences": [
+        "spicy",
+        "mexican",
+        "indian",
+        "thai"
+    ],
+    "interaction_count": 500,
+    "behavior_rules": {
+        "likes": {
+            "keywords": [
+                "chili",
+                "pepper",
+                "jalapeno",
+                "habanero",
+                "cayenne",
+                "spicy",
+                "hot",
+                "curry",
+                "sriracha",
+                "cajun",
+                "mexican",
+                "indian",
+                "thai",
+                "tex-mex",
+                "salsa"
+            ],
+            "rating_dist": [
+                4.0,
+                5.0
+            ],
+            "weights": [
+                0.4,
+                0.6
+            ]
+        },
+        "dislikes": {
+            "keywords": [
+                "bland",
+                "mild",
+                "vanilla",
+                "sweet",
+                "creamy",
+                "milk",
+                "butter",
+                "plain",
+                "sugar"
+            ],
+            "rating_dist": [
+                1.0,
+                2.0
+            ],
+            "weights": [
+                0.7,
+                0.3
+            ]
+        },
+        "neutral": {
+            "rating_dist": [
+                3.0
+            ],
+            "weights": [
+                1.0
+            ]
+        }
+    }
+}

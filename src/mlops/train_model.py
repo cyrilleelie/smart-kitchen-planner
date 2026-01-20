@@ -1,5 +1,6 @@
 import sys
 import os
+
 sys.path.append(os.getcwd())
 
 import pandas as pd
@@ -140,7 +141,11 @@ def calculate_context_penalty(recipe, meal_type, season):
         # Sauf si c'est un dessert (ex: tarte aux fruits qui match 'fruit' du snack)
         # On ne veut pas de petit-dej ou de snack comme plat de résistance
         # Sauf si c'est un dessert ou si c'est A LA FOIS main et breakfast (ex: bacon burger, carbonara)
-        if (is_breakfast_kw or is_snack_kw) and not is_main_kw and "dessert" not in text:
+        if (
+            (is_breakfast_kw or is_snack_kw)
+            and not is_main_kw
+            and "dessert" not in text
+        ):
             penalty -= 1.0  # Reduced from -2.0
 
         # Bonus si c'est clairement un plat principal
@@ -186,7 +191,9 @@ def train():
 
     with Session(engine) as session:
         # 0. Check for embeddings presence
-        missing_emb_count = session.query(Recipe).filter(Recipe.embedding == None).count()
+        missing_emb_count = (
+            session.query(Recipe).filter(Recipe.embedding.is_(None)).count()
+        )
         if missing_emb_count > 0:
             total_recipes = session.query(Recipe).count()
             msg = f"❌ CRITICAL: {missing_emb_count}/{total_recipes} recipes have NO embeddings! Please run 'python src/scripts/generate_embeddings.py' first."

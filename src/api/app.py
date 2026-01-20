@@ -52,6 +52,7 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
 def log_batch_predictions(entries: List[dict]):
     """
     Enregistre un lot de prédictions en base (granularité : item).
@@ -65,10 +66,10 @@ def log_batch_predictions(entries: List[dict]):
                 input_features=json.dumps(entry["input_features"], default=str),
                 prediction_result=json.dumps(entry["prediction_result"], default=str),
                 model_version=entry["model_version"],
-                timestamp=datetime.utcnow()
+                timestamp=datetime.utcnow(),
             )
             logs.append(log)
-        
+
         db.add_all(logs)
         db.commit()
         logger.info(f"📝 Logged {len(logs)} predictions.")
@@ -254,7 +255,7 @@ def get_contextual_recommendations(
 def generate_planning_batch(
     request: Request,
     planning_request: PlanningRequest = Body(...),
-    background_tasks: BackgroundTasks = None, # Injection BackgroundTasks
+    background_tasks: BackgroundTasks = None,  # Injection BackgroundTasks
     db: Session = Depends(get_db),
 ):
     """
@@ -402,26 +403,26 @@ def generate_planning_batch(
 
     if background_tasks:
         log_entries = []
-        
+
         # On parcourt ce qui a été généré
         for day_num, meals_dict in daily_menus.items():
             for m_id, item_data in meals_dict.items():
                 rec_id = item_data["recipe"].id
                 rec_score = item_data["score"]
-                
-                log_entries.append({
-                    "user_id": request.user_id,
-                    "model_version": "v2.8",
-                    "input_features": {
-                        "recipe_id": rec_id,
-                        "meal_type": m_id,
-                        "season": request.season
-                    },
-                    "prediction_result": {
-                        "score": round(rec_score, 4)
+
+                log_entries.append(
+                    {
+                        "user_id": request.user_id,
+                        "model_version": "v2.8",
+                        "input_features": {
+                            "recipe_id": rec_id,
+                            "meal_type": m_id,
+                            "season": request.season,
+                        },
+                        "prediction_result": {"score": round(rec_score, 4)},
                     }
-                })
+                )
 
         background_tasks.add_task(log_batch_predictions, log_entries)
-        
+
     return response_payload

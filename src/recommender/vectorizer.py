@@ -27,7 +27,7 @@ def generate_recipe_embeddings():
 
         # --- ÉTAPE 2 : SÉLECTION ---
         # On cherche ceux qui sont None
-        recipes = session.query(Recipe).filter(Recipe.embedding == None).all()
+        recipes = session.query(Recipe).filter(Recipe.embedding.is_(None)).all()
 
         total = len(recipes)
         print(f"👉 {total} recettes à traiter (NULL détectés).")

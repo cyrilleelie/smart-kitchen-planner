@@ -9,8 +9,10 @@ from dotenv import load_dotenv
 load_dotenv()
 sys.path.append(os.getcwd())
 
-from src.database.models import Base, Recipe, User  # noqa: E402
+from src.database.models import Base, Recipe  # noqa: E402
 from src.database.connection import engine  # noqa: E402
+from src.recommender.vectorizer import generate_recipe_embeddings  # noqa: E402
+
 
 # CONFIGURATION
 INITIAL_LIMIT = 5000
