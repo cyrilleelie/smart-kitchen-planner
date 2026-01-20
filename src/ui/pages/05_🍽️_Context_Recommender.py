@@ -80,7 +80,19 @@ with st.sidebar:
     )
     season_code = season_options[selected_season_label]
 
+    # 4. Sélection du Modèle (Nouveau)
     st.divider()
+    model_options = {
+        "🤖 Collaborative Filtering (SVD)": "collaborative",
+        "🌲 Content-Based (Random Forest)": "content_based",
+    }
+    selected_model_label = st.radio(
+        "🧠 Stratégie de Recommandation",
+        options=list(model_options.keys()),
+        index=0,
+        help="Collaborative: Basé sur les notes des autres users.\nContent-Based: Basé sur les tags et la nutrition.",
+    )
+    model_code = model_options[selected_model_label]
 
     # Bouton d'action
     launch_btn = st.button("✨ Générer les suggestions", type="primary")
@@ -91,9 +103,12 @@ if launch_btn:
     # Préparation de la requête
     payload = {"user_id": user_id, "meal_type": meal_code, "season": season_code}
 
+    # Construction de l'URL avec le paramètre de modèle
+    request_url = f"{API_URL}?model_type={model_code}"
+
     try:
-        with st.spinner("🧠 Interrogation du modèle IA..."):
-            response = requests.post(API_URL, json=payload)
+        with st.spinner(f"🧠 Interrogation du modèle ({model_code})..."):
+            response = requests.post(request_url, json=payload)
 
         if response.status_code == 200:
             recommendations = response.json()
