@@ -285,20 +285,22 @@ def generate_planning_batch(
     daily_menus = {d: {} for d in range(1, request.days + 1)}
 
     # Instantiation du service
-    service = InferenceService(db)
+    # service = InferenceService(db) # REMPLACÉ par generate_weekly_plan
+    from src.domain.recommendation_service import generate_weekly_plan
 
     # --- A. GESTION DES REPAS PRINCIPAUX (MIDI & SOIR) ---
     # Si on demande MIDI (1) ET SOIR (2), on utilise la stratégie 'Batch & Split'
     if 1 in selected_set and 2 in selected_set:
         # On génère 2x recettes d'un coup avec le contexte 'Déjeuner' (1)
         # On suppose que Déjeuner/Dîner sont interchangeables pour le modèle principal
-        main_meals = service.recommend_weekly_batch(
+        main_meals = generate_weekly_plan(
+            db=db,
             user_id=request.user_id,
             meal_type=1,  # On utilise 1 (Midi) comme contexte générique "Plat"
             season=request.season,
-            session=db,
             n_days=request.days * 2,  # Double dose
             target_calories=request.target_calories,
+            model_type=request.model_type, # <--- Nouveau paramètre
         )
 
         # Split : Première moitié pour midi, seconde pour le soir
@@ -322,13 +324,14 @@ def generate_planning_batch(
             continue
 
         # Appel standard pour 1 type de repas
-        meals = service.recommend_weekly_batch(
+        meals = generate_weekly_plan(
+            db=db,
             user_id=request.user_id,
-            meal_type=m_id,  # C'est ici qu'on passe le meal_type requis !
+            meal_type=m_id,
             season=request.season,
-            session=db,
             n_days=request.days,
             target_calories=request.target_calories,
+            model_type=request.model_type, # <--- Nouveau paramètre
         )
 
         for i in range(request.days):

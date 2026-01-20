@@ -174,6 +174,124 @@ def generate_recommendations(
     recipe_map = {r.id: r for r in recipes}
 
     # Return (Recipe, score) tuples in the ranked order
-    return [
-        (recipe_map[rid], scores_map[rid]) for rid in ordered_ids if rid in recipe_map
-    ]
+    return [(recipe_map[rid], scores_map[rid]) for rid in ordered_ids if rid in recipe_map]
+
+
+def generate_weekly_plan(
+    db: Session,
+    user_id: int,
+    meal_type: int,
+    season: int,
+    n_days: int = 7,
+    target_calories: int | None = None,
+    model_type: str = "collaborative",
+) -> List[dict]:
+    """
+    Generate a weekly batch of recipes respecting constraints and diversity (80/20).
+
+    Logic:
+    1. Fetch a large pool of candidates.
+    2. Filter by calories (if target_calories provided).
+    3. Rank using the selected strategy (content_based vs collaborative).
+    4. Apply 80% Performance / 20% Discovery rule.
+    """
+    # 1. Fetch Candidates (Broad strategy: fetch all or limit to ~1000)
+    # We apply constraint (Calorie) first to reduce load on ranker if possible, 
+    # but here we need to fetch objects to check calories.
+    query = db.query(Recipe)
+    
+    # 1a. Pre-filter by calories if strictly required?
+    # For now, let's fetch a reasonable pool and filter in memory to keep it simple 
+    # and consistent with previous InferenceService logic.
+    candidates_pool = query.limit(1000).all()
+    
+    # 2. Filter by Calories
+    filtered_ids = []
+    recipe_map = {}
+    
+    if target_calories and target_calories > 0:
+        min_cal = target_calories * 0.7
+        max_cal = target_calories * 1.3
+        
+        for r in candidates_pool:
+            cals = 0.0
+            try:
+                if r.nutrition_info:
+                    # Assuming nutrition_info is valid JSON or eval-able list
+                    # Safest generic parse as per previous service logic
+                    import ast
+                    cals = float(ast.literal_eval(r.nutrition_info)[0])
+            except Exception:
+                pass
+            
+            # Keep if valid or if 0 (unknown) to not block
+            if cals == 0 or (min_cal <= cals <= max_cal):
+                filtered_ids.append(r.id)
+                recipe_map[r.id] = r
+    else:
+        filtered_ids = [r.id for r in candidates_pool]
+        recipe_map = {r.id: r for r in candidates_pool}
+
+    if not filtered_ids:
+        # Fallback: take top 100 unfiltered
+        fallback = query.limit(100).all()
+        filtered_ids = [r.id for r in fallback]
+        recipe_map = {r.id: r for r in fallback}
+
+    # 3. Rank
+    if model_type == "content_based":
+        strategy = RandomForestStrategy(db)
+    else:
+        strategy = SVDSurpriseStrategy(db)
+
+    # We need to rank ALL candidates to find the top ones
+    # rank returns (id, score)
+    ranked = strategy.rank(user_id, filtered_ids, top_n=len(filtered_ids))
+    
+    if not ranked:
+        return []
+
+    # 4. 80/20 Strategy (Performance vs Discovery)
+    # Reconstruct dict items with tags
+    all_results = []
+    for rid, score in ranked:
+        all_results.append({
+            "recipe": recipe_map[rid],
+            "score": score,
+            "tag": None
+        })
+        
+    n_perf = max(1, int(n_days * 0.8))
+    n_disco = n_days - n_perf
+    
+    final_selection = []
+    
+    # A. Performance
+    perf_pool = all_results[:n_perf]
+    for item in perf_pool:
+        item["tag"] = "Performance"
+        final_selection.append(item)
+        
+    # B. Discovery (10% - 40% items)
+    start_idx = int(len(all_results) * 0.10)
+    end_idx = int(len(all_results) * 0.40)
+    
+    if start_idx >= end_idx:
+        discovery_pool = all_results[n_perf : n_perf + n_disco]
+    else:
+        discovery_pool = all_results[start_idx:end_idx]
+        
+    if discovery_pool:
+        import random
+        discovery_pool = [x for x in discovery_pool if x not in final_selection]
+        if discovery_pool:
+            chosen_disco = random.sample(discovery_pool, min(len(discovery_pool), n_disco))
+            for item in chosen_disco:
+                item["tag"] = "Découverte"
+                final_selection.append(item)
+                
+    # Shuffle for variety
+    import random
+    random.shuffle(final_selection)
+    
+    return final_selection[:n_days]
