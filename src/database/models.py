@@ -50,3 +50,15 @@ class Interaction(Base):
     recipe = relationship(
         "Recipe"
     )  # <-- C'est ça qui manquait pour 'interaction.recipe' !
+
+
+class PredictionLog(Base):
+    __tablename__ = "prediction_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    user_id = Column(Integer, nullable=True) # Peut être null si anonyme
+    input_features = Column(JSON)      # Le payload complet / contexte
+    prediction_result = Column(JSON)   # La réponse envoyée
+    model_version = Column(String)     # Facilite l'A/B testing ou rollback
+

@@ -26,8 +26,8 @@ def generate_recipe_embeddings():
             logger.debug(f"   Type de la donnée: {type(sample.embedding)}")
 
         # --- ÉTAPE 2 : SÉLECTION ---
-        # On cherche ceux qui sont None (Python) ou liste vide
-        recipes = session.query(Recipe).filter(Recipe.embedding is None).all()
+        # On cherche ceux qui sont None
+        recipes = session.query(Recipe).filter(Recipe.embedding == None).all()
 
         total = len(recipes)
         print(f"👉 {total} recettes à traiter (NULL détectés).")

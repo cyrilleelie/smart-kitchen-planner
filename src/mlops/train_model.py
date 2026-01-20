@@ -1,5 +1,7 @@
 import sys
 import os
+sys.path.append(os.getcwd())
+
 import pandas as pd
 import numpy as np
 import random
@@ -19,14 +21,12 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# Configuration des chemins
-sys.path.append(os.getcwd())
 
 from src.database.connection import engine  # noqa: E402
 from src.database.models import Interaction, Recipe  # noqa: E402
 
 # --- CONFIGURATION MLOPS ---
-MLFLOW_URI = "http://mlflow:5000"
+MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 EXPERIMENT_NAME = "SmartRetail_Context_Ranking"
 
 # --- HEURISTIQUES MÉTIER SIMPLIFIÉES ---
@@ -138,8 +138,10 @@ def calculate_context_penalty(recipe, meal_type, season):
     elif meal_type == 1:
         # On ne veut pas de petit-dej ou de snack comme plat de résistance
         # Sauf si c'est un dessert (ex: tarte aux fruits qui match 'fruit' du snack)
-        if (is_breakfast_kw or is_snack_kw) and "dessert" not in text:
-            penalty -= 2.0
+        # On ne veut pas de petit-dej ou de snack comme plat de résistance
+        # Sauf si c'est un dessert ou si c'est A LA FOIS main et breakfast (ex: bacon burger, carbonara)
+        if (is_breakfast_kw or is_snack_kw) and not is_main_kw and "dessert" not in text:
+            penalty -= 1.0  # Reduced from -2.0
 
         # Bonus si c'est clairement un plat principal
         if is_main_kw:
@@ -183,6 +185,14 @@ def train():
     mlflow.set_experiment(EXPERIMENT_NAME)
 
     with Session(engine) as session:
+        # 0. Check for embeddings presence
+        missing_emb_count = session.query(Recipe).filter(Recipe.embedding == None).count()
+        if missing_emb_count > 0:
+            total_recipes = session.query(Recipe).count()
+            msg = f"❌ CRITICAL: {missing_emb_count}/{total_recipes} recipes have NO embeddings! Please run 'python src/scripts/generate_embeddings.py' first."
+            logger.error(msg)
+            raise ValueError(msg)
+
         logger.info("   📥 Chargement des interactions brutes...")
         results = session.query(Interaction, Recipe).join(Recipe).all()
 

@@ -99,15 +99,11 @@ docker-compose ps
 ### Initialisation des Données
 
 ```bash
-# Créer les tables et charger les recettes
+# Créer les tables, charger les recettes et générer les embeddings
 docker-compose exec app python src/scripts/init_db.py
 
-# Charger des recettes supplémentaires (batch de 1000 par défaut)
+# Charger des recettes supplémentaires (batch de 1000 par défaut) et générer les embeddings
 docker-compose exec app python src/scripts/load_recipes.py --count 1000
-
-
-# Générer les embeddings (peut prendre quelques minutes)
-docker-compose exec app python src/scripts/generate_embeddings.py
 
 # Charger un utilisateur avec un profil prédéfini (persona) et génère des interactions en fonction du profil (nombre en paramètre dans le fichier json)
 # Exemples de personas disponibles dans data/personas/

@@ -20,6 +20,7 @@ services:
     environment:
       # L'URL de connexion : on utilise le nom du service 'db' comme hôte
       - DATABASE_URL=postgresql://user:password@db:5432/smartretail
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
       - PYTHONPATH=/app
     ports:
       - "8000:8000"

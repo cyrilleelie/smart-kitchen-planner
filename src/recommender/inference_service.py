@@ -1,4 +1,5 @@
 import random
+import os
 import mlflow.sklearn
 import numpy as np
 import ast
@@ -16,7 +17,7 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 # Configuration
-MLFLOW_URI = "http://mlflow:5000"
+MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 mlflow.set_tracking_uri(MLFLOW_URI)
 
 

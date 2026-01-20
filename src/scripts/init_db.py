@@ -97,10 +97,8 @@ def init_database():
 
         print("   ✅ Base initialisée avec succès.")
 
-        # User par défaut
-        user = User(username="Chef Cyril", preferences=[])
-        session.add(user)
-        session.commit()
+        # Lancement automatique de la vectorisation (si nécessaire)
+        generate_recipe_embeddings()
 
 
 if __name__ == "__main__":

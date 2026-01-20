@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, Body, Request
+from fastapi import FastAPI, HTTPException, Depends, Body, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
@@ -11,8 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import os  # <--- AJOUT IMPORTANT
 
 # --- IMPORTS INTERNES ---
-from src.database.connection import get_db
-from src.database.models import User, Interaction, Recipe
+from src.database.connection import get_db, SessionLocal
+from src.database.models import User, Interaction, Recipe, PredictionLog
 
 from src.recommender.inference_service import InferenceService
 import json
@@ -51,6 +51,32 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+def log_batch_predictions(entries: List[dict]):
+    """
+    Enregistre un lot de prédictions en base (granularité : item).
+    """
+    db = SessionLocal()
+    try:
+        logs = []
+        for entry in entries:
+            log = PredictionLog(
+                user_id=entry["user_id"],
+                input_features=json.dumps(entry["input_features"], default=str),
+                prediction_result=json.dumps(entry["prediction_result"], default=str),
+                model_version=entry["model_version"],
+                timestamp=datetime.utcnow()
+            )
+            logs.append(log)
+        
+        db.add_all(logs)
+        db.commit()
+        logger.info(f"📝 Logged {len(logs)} predictions.")
+    except Exception as e:
+        logger.error(f"❌ Failed to log batch: {e}")
+    finally:
+        db.close()
+
 
 # CORS Configuration
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8501").split(",")
@@ -228,6 +254,7 @@ def get_contextual_recommendations(
 def generate_planning_batch(
     request: Request,
     planning_request: PlanningRequest = Body(...),
+    background_tasks: BackgroundTasks = None, # Injection BackgroundTasks
     db: Session = Depends(get_db),
 ):
     """
@@ -363,7 +390,7 @@ def generate_planning_batch(
     avg_score = total_score / items_count if items_count else 0
     avg_cals = total_calories / items_count if items_count else 0
 
-    return MenuResponse(
+    response_payload = MenuResponse(
         status="success",
         user=f"User {request.user_id}",
         plan=plan_items,
@@ -372,3 +399,29 @@ def generate_planning_batch(
             "average_calories": round(avg_cals, 0),
         },
     )
+
+    if background_tasks:
+        log_entries = []
+        
+        # On parcourt ce qui a été généré
+        for day_num, meals_dict in daily_menus.items():
+            for m_id, item_data in meals_dict.items():
+                rec_id = item_data["recipe"].id
+                rec_score = item_data["score"]
+                
+                log_entries.append({
+                    "user_id": request.user_id,
+                    "model_version": "v2.8",
+                    "input_features": {
+                        "recipe_id": rec_id,
+                        "meal_type": m_id,
+                        "season": request.season
+                    },
+                    "prediction_result": {
+                        "score": round(rec_score, 4)
+                    }
+                })
+
+        background_tasks.add_task(log_batch_predictions, log_entries)
+        
+    return response_payload

@@ -12,6 +12,7 @@ sys.path.append(os.getcwd())
 
 from src.database.models import Recipe  # noqa: E402
 from src.database.connection import engine  # noqa: E402
+from src.recommender.vectorizer import generate_recipe_embeddings  # noqa: E402
 
 # CONFIGURATION
 CSV_PATHS = ["data/raw/RAW_recipes.csv"]
@@ -104,6 +105,9 @@ def load_recipes(count: int):
             print(f"   ℹ️ Ajustement séquence ignoré ({e})")
 
         print(f"✅ Succès : {len(new_recipes)} recettes ajoutées.")
+
+    # Lancement automatique de la vectorisation pour les nouvelles recettes
+    generate_recipe_embeddings()
 
 
 if __name__ == "__main__":
