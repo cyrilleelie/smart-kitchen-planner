@@ -23,7 +23,6 @@ from src.recommender.inference_service import InferenceService
 
 # Surprise imports – the model is stored with ``surprise.dump``
 import surprise
-from surprise import SVD
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +76,10 @@ class SVDSurpriseStrategy(RecommendationStrategy):
 
     def __init__(self, db: Session):
         self.db = db
-        # Load the SVD model – ``surprise.dump`` stores a dictionary with ``algo``
+        # Load the SVD model – ``surprise.dump`` stores a tuple (predictions, algo)
         model_path = "src/models/svd_model.pkl"
         try:
-            dump = surprise.dump.load(model_path)
-            self.algo: SVD = dump["algo"]
+            _, self.algo = surprise.dump.load(model_path)
         except Exception as e:
             logger.error(f"Failed to load SVD model from {model_path}: {e}")
             raise
@@ -132,7 +130,7 @@ def generate_recommendations(
     constraints: dict | None = None,
     top_n: int = 10,
     model_type: str = "collaborative",
-) -> List[Recipe]:
+) -> List[Tuple[Recipe, float]]:
     """Public API used by the FastAPI endpoint.
 
     Parameters
@@ -148,6 +146,11 @@ def generate_recommendations(
     model_type: str
         ``"content_based"`` for the RandomForest pipeline or ``"collaborative"``
         for the SVD pipeline. Defaults to ``"collaborative"`` as requested.
+
+    Returns
+    -------
+    List[Tuple[Recipe, float]]
+        A list of (recipe, score) tuples sorted by descending score.
     """
     constraints = constraints or {}
     candidate_ids = _apply_constraints(db, constraints)
@@ -163,8 +166,14 @@ def generate_recommendations(
     # Fetch full Recipe objects preserving order
     if not ranked:
         return []
+
     ordered_ids = [rid for rid, _ in ranked]
+    scores_map = {rid: score for rid, score in ranked}
+
     recipes = db.query(Recipe).filter(Recipe.id.in_(ordered_ids)).all()
-    # Preserve the ranking order
     recipe_map = {r.id: r for r in recipes}
-    return [recipe_map[rid] for rid in ordered_ids if rid in recipe_map]
+
+    # Return (Recipe, score) tuples in the ranked order
+    return [
+        (recipe_map[rid], scores_map[rid]) for rid in ordered_ids if rid in recipe_map
+    ]

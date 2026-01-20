@@ -228,7 +228,8 @@ def get_contextual_recommendations(
         constraints["max_time"] = context_request.max_time
 
     # Generate recommendations using selected model type
-    recipes = generate_recommendations(
+    # Returns List[Tuple[Recipe, float]]
+    results = generate_recommendations(
         db=db,
         user_id=context_request.user_id,
         constraints=constraints,
@@ -237,7 +238,7 @@ def get_contextual_recommendations(
     )
 
     response = []
-    for recipe in recipes:
+    for recipe, score in results:
         cals = 0.0
         try:
             if recipe.nutrition_info:
@@ -251,7 +252,7 @@ def get_contextual_recommendations(
                 id=recipe.id,
                 name=recipe.name,
                 minutes=recipe.minutes,
-                score=0.0,  # Score not directly available; could be added later
+                score=round(score, 2),  # Use the actual model score
                 calories=cals,
             )
         )
