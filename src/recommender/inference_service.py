@@ -70,10 +70,27 @@ class InferenceService:
                 self.model = mlflow.sklearn.load_model(model_uri)
                 print(f"✅ Modèle chargé (Run ID: {latest_run_id})")
                 return self.model
-            return None
+
+            # Fallback local
+            raise Exception("No MLflow run found")
+
         except Exception as e:
-            print(f"❌ Erreur chargement modèle: {e}")
-            logger.error(f"❌ Erreur chargement modèle: {e}")
+            print(f"⚠️ Warning MLflow: {e}")
+            logger.warning(f"⚠️ Warning MLflow: {e}")
+
+            # Essayons de charger le modèle local
+            local_path = "src/models/rf_model.pkl"
+            if os.path.exists(local_path):
+                import joblib
+
+                try:
+                    self.model = joblib.load(local_path)
+                    print(f"✅ Modèle local chargé : {local_path}")
+                    logger.info(f"✅ Modèle local chargé : {local_path}")
+                    return self.model
+                except Exception as local_e:
+                    logger.error(f"❌ Erreur chargement local: {local_e}")
+
             return None
 
     def _parse_vector(self, embedding_data):
@@ -216,6 +233,69 @@ class InferenceService:
         if month in [6, 7, 8]:
             return 2.0
         return 3.0
+
+    def rank_recipes(
+        self, user_id: int, recipes: list[Recipe], context: dict
+    ) -> list[dict[str, Any]]:
+        """
+        Rank a specific list of recipes given a user context.
+        """
+        if not self.model:
+            return []
+
+        user_vector = UserProfiler(self.db).get_weighted_profile(user_id)
+        if user_vector is None:
+            return []
+
+        # Extract context or default to current time
+        if "meal_type" in context:
+            meal_feature = float(context["meal_type"])
+        else:
+            meal_feature = self._get_meal_type_feature(datetime.datetime.now().hour)
+
+        if "season" in context:
+            season_feature = float(context["season"])
+        else:
+            season_feature = self._get_season_feature(datetime.datetime.now().month)
+
+        X_pred = []
+        valid_candidates = []
+
+        for r in recipes:
+            try:
+                r_vec = self._parse_vector(r.embedding)
+                features = np.concatenate(
+                    [
+                        user_vector,
+                        r_vec,
+                        [meal_feature],
+                        [season_feature],
+                    ]
+                )
+                X_pred.append(features)
+                valid_candidates.append(r)
+            except Exception:
+                continue
+
+        if not X_pred:
+            return []
+
+        try:
+            preds = self.model.predict(X_pred)
+            results = []
+            for r, score in zip(valid_candidates, preds):
+                results.append(
+                    {
+                        "id": r.id,
+                        "score": float(score),
+                    }
+                )
+            # Sort desc
+            results.sort(key=lambda x: x["score"], reverse=True)
+            return results
+        except Exception as e:
+            logger.error(f"❌ Erreur rank_recipes : {e}")
+            return []
 
     def _get_calories(self, recipe):
         """Helper pour extraire les calories proprement"""

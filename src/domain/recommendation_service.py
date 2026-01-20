@@ -32,7 +32,11 @@ class RecommendationStrategy(ABC):
 
     @abstractmethod
     def rank(
-        self, user_id: int, candidate_ids: List[int], top_n: int
+        self,
+        user_id: int,
+        candidate_ids: List[int],
+        top_n: int,
+        context: dict | None = None,
     ) -> List[Tuple[int, float]]:
         """Return a list of ``(recipe_id, score)`` tuples sorted by descending score.
 
@@ -53,16 +57,24 @@ class RandomForestStrategy(RecommendationStrategy):
         self.service = InferenceService(db)
 
     def rank(
-        self, user_id: int, candidate_ids: List[int], top_n: int
+        self,
+        user_id: int,
+        candidate_ids: List[int],
+        top_n: int,
+        context: dict | None = None,
     ) -> List[Tuple[int, float]]:
-        # The InferenceService currently does not accept a pre‑filtered list, so we
-        # call its ``recommend`` method and then filter the results.
-        raw_recs = self.service.recommend(user_id=user_id, n=top_n * 5)  # oversample
-        # Filter to the candidate set
-        filtered = [r for r in raw_recs if r["id"] in candidate_ids]
-        # Sort and keep top_n
-        filtered.sort(key=lambda x: x["score"], reverse=True)
-        return [(r["id"], r["score"]) for r in filtered[:top_n]]
+        # Fetch actual recipe objects for the candidate_ids
+        # This fixes the issue where service.recommend() would return a random subset
+        # causing no overlap with candidate_ids.
+        recipes = self.db.query(Recipe).filter(Recipe.id.in_(candidate_ids)).all()
+
+        context = context or {}
+
+        # Use the new explicit ranking method in InferenceService
+        results = self.service.rank_recipes(user_id, recipes, context)
+
+        # results is List[dict] with 'id' and 'score'
+        return [(r["id"], r["score"]) for r in results[:top_n]]
 
 
 class SVDSurpriseStrategy(RecommendationStrategy):
@@ -93,7 +105,11 @@ class SVDSurpriseStrategy(RecommendationStrategy):
         return float(avg) if avg is not None else 0.0
 
     def rank(
-        self, user_id: int, candidate_ids: List[int], top_n: int
+        self,
+        user_id: int,
+        candidate_ids: List[int],
+        top_n: int,
+        context: dict | None = None,
     ) -> List[Tuple[int, float]]:
         scores: List[Tuple[int, float]] = []
         for rid in candidate_ids:
@@ -140,7 +156,8 @@ def generate_recommendations(
     user_id: int
         Identifier of the target user.
     constraints: dict | None
-        Optional filtering constraints (e.g. ``{"vegetarian": True, "max_time": 30}``).
+        Optional filtering constraints (e.g. ``{"vegetarian": True, "max_time": 30}``, ``{"meal_type": 1, "season": 0}``).
+        Note: Context like meal_type/season should be passed in constraints for RF model.
     top_n: int
         Number of recipes to return.
     model_type: str
@@ -162,7 +179,16 @@ def generate_recommendations(
     else:
         strategy = SVDSurpriseStrategy(db)
 
-    ranked = strategy.rank(user_id=user_id, candidate_ids=candidate_ids, top_n=top_n)
+    # Convert constraints to context for RF
+    context = {}
+    if "meal_type" in constraints:
+        context["meal_type"] = constraints["meal_type"]
+    if "season" in constraints:
+        context["season"] = constraints["season"]
+
+    ranked = strategy.rank(
+        user_id=user_id, candidate_ids=candidate_ids, top_n=top_n, context=context
+    )
     # Fetch full Recipe objects preserving order
     if not ranked:
         return []
@@ -174,7 +200,9 @@ def generate_recommendations(
     recipe_map = {r.id: r for r in recipes}
 
     # Return (Recipe, score) tuples in the ranked order
-    return [(recipe_map[rid], scores_map[rid]) for rid in ordered_ids if rid in recipe_map]
+    return [
+        (recipe_map[rid], scores_map[rid]) for rid in ordered_ids if rid in recipe_map
+    ]
 
 
 def generate_weekly_plan(
@@ -196,23 +224,23 @@ def generate_weekly_plan(
     4. Apply 80% Performance / 20% Discovery rule.
     """
     # 1. Fetch Candidates (Broad strategy: fetch all or limit to ~1000)
-    # We apply constraint (Calorie) first to reduce load on ranker if possible, 
+    # We apply constraint (Calorie) first to reduce load on ranker if possible,
     # but here we need to fetch objects to check calories.
     query = db.query(Recipe)
-    
+
     # 1a. Pre-filter by calories if strictly required?
-    # For now, let's fetch a reasonable pool and filter in memory to keep it simple 
+    # For now, let's fetch a reasonable pool and filter in memory to keep it simple
     # and consistent with previous InferenceService logic.
     candidates_pool = query.limit(1000).all()
-    
+
     # 2. Filter by Calories
     filtered_ids = []
     recipe_map = {}
-    
+
     if target_calories and target_calories > 0:
         min_cal = target_calories * 0.7
         max_cal = target_calories * 1.3
-        
+
         for r in candidates_pool:
             cals = 0.0
             try:
@@ -220,10 +248,11 @@ def generate_weekly_plan(
                     # Assuming nutrition_info is valid JSON or eval-able list
                     # Safest generic parse as per previous service logic
                     import ast
+
                     cals = float(ast.literal_eval(r.nutrition_info)[0])
             except Exception:
                 pass
-            
+
             # Keep if valid or if 0 (unknown) to not block
             if cals == 0 or (min_cal <= cals <= max_cal):
                 filtered_ids.append(r.id)
@@ -246,8 +275,11 @@ def generate_weekly_plan(
 
     # We need to rank ALL candidates to find the top ones
     # rank returns (id, score)
-    ranked = strategy.rank(user_id, filtered_ids, top_n=len(filtered_ids))
-    
+    context = {"meal_type": meal_type, "season": season}
+    ranked = strategy.rank(
+        user_id, filtered_ids, top_n=len(filtered_ids), context=context
+    )
+
     if not ranked:
         return []
 
@@ -255,12 +287,8 @@ def generate_weekly_plan(
     # Reconstruct dict items with tags
     all_results = []
     for rid, score in ranked:
-        all_results.append({
-            "recipe": recipe_map[rid],
-            "score": score,
-            "tag": None
-        })
-        
+        all_results.append({"recipe": recipe_map[rid], "score": score, "tag": None})
+
     # If using collaborative filtering, return purely the top recommendations (Performance)
     # as requested by the user.
     if model_type == "collaborative":
@@ -272,35 +300,39 @@ def generate_weekly_plan(
 
     n_perf = max(1, int(n_days * 0.8))
     n_disco = n_days - n_perf
-    
+
     final_selection = []
-    
+
     # A. Performance
     perf_pool = all_results[:n_perf]
     for item in perf_pool:
         item["tag"] = "Performance"
         final_selection.append(item)
-        
+
     # B. Discovery (10% - 40% items)
     start_idx = int(len(all_results) * 0.10)
     end_idx = int(len(all_results) * 0.40)
-    
+
     if start_idx >= end_idx:
         discovery_pool = all_results[n_perf : n_perf + n_disco]
     else:
         discovery_pool = all_results[start_idx:end_idx]
-        
+
     if discovery_pool:
         import random
+
         discovery_pool = [x for x in discovery_pool if x not in final_selection]
         if discovery_pool:
-            chosen_disco = random.sample(discovery_pool, min(len(discovery_pool), n_disco))
+            chosen_disco = random.sample(
+                discovery_pool, min(len(discovery_pool), n_disco)
+            )
             for item in chosen_disco:
                 item["tag"] = "Découverte"
                 final_selection.append(item)
-                
+
     # Shuffle for variety
     import random
+
     random.shuffle(final_selection)
-    
+
     return final_selection[:n_days]

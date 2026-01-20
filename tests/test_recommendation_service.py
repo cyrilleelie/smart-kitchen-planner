@@ -42,20 +42,27 @@ def test_apply_constraints(mock_db, mock_recipes):
 @patch("src.domain.recommendation_service.InferenceService")
 def test_random_forest_strategy(mock_inference_cls, mock_db):
     mock_service = mock_inference_cls.return_value
-    # Service returns list of dicts with 'id' and 'score'
-    mock_service.recommend.return_value = [
+    # Service uses rank_recipes now
+    mock_service.rank_recipes.return_value = [
         {"id": 1, "score": 0.9},
-        {"id": 2, "score": 0.5},
         {"id": 3, "score": 0.1},
     ]
 
     strategy = RandomForestStrategy(mock_db)
-    # Testing for candidate_ids=[1, 3], so 2 should be filtered out
+    # The strategy fetches recipes from DB, so we need to mock DB query too
+    mock_query = mock_db.query.return_value
+    mock_query.filter.return_value.all.return_value = [
+        Recipe(id=1, name="R1"),
+        Recipe(id=3, name="R3"),
+    ]
+
+    # Testing for candidate_ids=[1, 3]
     ranked = strategy.rank(user_id=1, candidate_ids=[1, 3], top_n=2)
 
     assert len(ranked) == 2
     assert ranked[0] == (1, 0.9)
     assert ranked[1] == (3, 0.1)
+    mock_service.rank_recipes.assert_called_once()
 
 
 @patch("src.domain.recommendation_service.surprise.dump.load")
@@ -67,7 +74,8 @@ def test_svd_surprise_strategy(mock_dump_load, mock_db):
     start_prediction.est = 3.5
     mock_algo.predict.side_effect = lambda uid, iid: start_prediction
 
-    mock_dump_load.return_value = {"algo": mock_algo}
+    # dump.load returns (predictions, algo)
+    mock_dump_load.return_value = (None, mock_algo)
 
     strategy = SVDSurpriseStrategy(mock_db)
     ranked = strategy.rank(user_id=1, candidate_ids=[10, 20], top_n=2)
@@ -85,7 +93,7 @@ def test_svd_surprise_strategy_fallback(mock_dump_load, mock_db):
     nan_prediction.est = float("nan")
     mock_algo.predict.return_value = nan_prediction
 
-    mock_dump_load.return_value = {"algo": mock_algo}
+    mock_dump_load.return_value = (None, mock_algo)
 
     # Mock global average query
     # db.query().filter().scalar()
@@ -116,10 +124,14 @@ def test_generate_recommendations_content_based(
     res = generate_recommendations(mock_db, user_id=1, model_type="content_based")
 
     assert len(res) == 2
-    assert res[0].id == 1
-    assert res[1].id == 2
+    assert res[0][0].id == 1
+    assert res[1][0].id == 2
     mock_rf.assert_called_once()
     mock_svd.assert_not_called()
+    # rank is now called with context={}
+    mock_rf_instance.rank.assert_called_with(
+        user_id=1, candidate_ids=[1, 2], top_n=10, context={}
+    )
 
 
 @patch("src.domain.recommendation_service.RandomForestStrategy")
@@ -139,6 +151,10 @@ def test_generate_recommendations_collaborative(
     res = generate_recommendations(mock_db, user_id=1, model_type="collaborative")
 
     assert len(res) == 1
-    assert res[0].id == 2
+    assert res[0][0].id == 2
     mock_svd.assert_called_once()
     mock_rf.assert_not_called()
+    # rank is now called with context={}
+    mock_svd_instance.rank.assert_called_with(
+        user_id=1, candidate_ids=[2], top_n=10, context={}
+    )

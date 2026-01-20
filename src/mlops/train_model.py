@@ -335,7 +335,15 @@ def train():
         mlflow.log_metric("mae", mae)
 
         mlflow.sklearn.log_model(model, "model")
-        logger.info("   💾 Modèle sauvegardé !")
+        logger.info("   💾 Modèle sauvegardé dans MLflow !")
+
+        # Save locally as fallback
+        import joblib
+
+        local_path = "src/models/rf_model.pkl"
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        joblib.dump(model, local_path)
+        logger.info(f"   💾 Modèle sauvegardé localement : {local_path}")
 
 
 # New SVD training pipeline using scikit-surprise

@@ -14,7 +14,6 @@ import os  # <--- AJOUT IMPORTANT
 from src.database.connection import get_db, SessionLocal
 from src.database.models import User, Interaction, Recipe, PredictionLog
 
-from src.recommender.inference_service import InferenceService
 import json
 import logging
 import ast
@@ -301,7 +300,7 @@ def generate_planning_batch(
             season=request.season,
             n_days=request.days * 2,  # Double dose
             target_calories=request.target_calories,
-            model_type=request.model_type, # <--- Nouveau paramètre
+            model_type=request.model_type,  # <--- Nouveau paramètre
         )
 
         # Split : Première moitié pour midi, seconde pour le soir
@@ -332,7 +331,7 @@ def generate_planning_batch(
             season=request.season,
             n_days=request.days,
             target_calories=request.target_calories,
-            model_type=request.model_type, # <--- Nouveau paramètre
+            model_type=request.model_type,  # <--- Nouveau paramètre
         )
 
         for i in range(request.days):
@@ -363,18 +362,18 @@ def generate_planning_batch(
                         raw = recipe.nutrition_info
                         try:
                             parsed = json.loads(raw)
-                        except:
+                        except Exception:
                             parsed = ast.literal_eval(raw)
                         cals = float(parsed[0])
                     except Exception:
                         pass
-                
+
                 if recipe.ingredients:
                     try:
                         raw = recipe.ingredients
                         try:
                             ing_list = json.loads(raw)
-                        except:
+                        except Exception:
                             ing_list = ast.literal_eval(raw)
                     except Exception:
                         pass
@@ -384,7 +383,7 @@ def generate_planning_batch(
                         raw = recipe.tags
                         try:
                             rec_tags = json.loads(raw)
-                        except:
+                        except Exception:
                             rec_tags = ast.literal_eval(raw)
                     except Exception:
                         pass
