@@ -18,7 +18,7 @@ raw_recipes.csv
 mlruns/
 mlruns_old/
 reports/
-*.pkl
+# *.pkl
 *.joblib
 *.h5
 catalogue-*.whl
