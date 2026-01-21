@@ -222,7 +222,13 @@ def fetch_prediction_logs(days=7, model_type="rf"):
                     if r_id is None:
                         continue
 
-                    predicted_score = log.prediction_score  # Assuming this field exists
+                    # Correctly parse prediction_result to get score
+                    pred_res = (
+                        json.loads(log.prediction_result)
+                        if isinstance(log.prediction_result, str)
+                        else log.prediction_result
+                    )
+                    predicted_score = pred_res.get("score") if pred_res else None
 
                     # Try to find real interaction
                     # This might be expensive N+1 query, but for monitoring 7 days it's okay-ish.
@@ -232,7 +238,7 @@ def fetch_prediction_logs(days=7, model_type="rf"):
                         .first()
                     )
 
-                    row = {"prediction": predicted_score if predicted_score else np.nan}
+                    row = {"prediction": predicted_score if predicted_score is not None else np.nan}
                     if interaction:
                         row["rating"] = interaction.rating
                     else:
