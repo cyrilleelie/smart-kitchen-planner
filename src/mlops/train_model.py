@@ -388,8 +388,13 @@ def train_svd():
             params = best_params
         else:
             logger.info("   ⚙️  Using default SVD parameters.")
-            params = {"n_factors": 100, "n_epochs": 20, "lr_all": 0.005, "reg_all": 0.02}
-        
+            params = {
+                "n_factors": 100,
+                "n_epochs": 20,
+                "lr_all": 0.005,
+                "reg_all": 0.02,
+            }
+
         mlflow.log_params(params)
 
         # 2. Train Model
