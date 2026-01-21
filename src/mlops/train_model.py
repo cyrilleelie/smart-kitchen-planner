@@ -391,6 +391,27 @@ def train_svd():
         logger.info("   💾 Modèle SVD sauvegardé !")
 
         # Log model file as artifact because surprise is not directly supported by mlflow.sklearn
+        # Save reference data (Rating, Prediction) for monitoring
+        # Prediction on trainset (approximate 'reference' distribution)
+        train_preds = algo.test(trainset.build_testset())
+        ref_data = []
+        for p in train_preds:
+            ref_data.append(
+                {
+                    "user_id": p.uid,
+                    "recipe_id": p.iid,
+                    "rating": p.r_ui,
+                    "prediction": p.est,
+                }
+            )
+
+        ref_df = pd.DataFrame(ref_data)
+        ref_path = "reference_data.csv"
+        ref_df.to_csv(ref_path, index=False)
+        mlflow.log_artifact(ref_path, "drift_reference")
+        if os.path.exists(ref_path):
+            os.remove(ref_path)
+
         mlflow.log_artifact("src/models/svd_model.pkl", artifact_path="model")
 
 

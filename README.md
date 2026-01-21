@@ -201,11 +201,7 @@ docker-compose exec app python src/mlops/train_model.py --pipeline rf
 # Entraîner le modèle de Collaborative Filtering (SVD)
 docker-compose exec app python src/mlops/train_model.py --pipeline svd
 
-# Vérifier le drift des données
-docker-compose exec app python src/mlops/monitor_drift.py
-
-# Orchestrateur MLOps (vérifie le drift et réentraîne si nécessaire)
-docker-compose exec app python src/mlops/orchestrator.py
+# Voir la section MLOps pour le Monitoring et l'Orchestration
 ```
 
 ---
@@ -228,7 +224,33 @@ Le projet intègre un pipeline MLOps complet :
     - **SVD (svd)** : Filtrage collaboratif pur (Matrix Factorization) pour la personnalisation.
 2. **Tracking** : Paramètres, métriques (RMSE, MAE) et artefacts dans MLflow.
 3. **Inférence** : Sélection dynamique de la stratégie (Content-Based vs Collaborative).
-4. **Monitoring** : Détection du drift avec Evidently (KS-test).
+4. **Monitoring** : Détection du drift avec Evidently.
+    - **Random Forest (rf)** : Tests KS (Embeddings) et Chi-Square (Categorical).
+    - **SVD (collaborative)** : Test Wasserstein sur les distributions de scores et ratings.
+    - **Rapports** : Générés dans `reports/rf/` et `reports/svd/`.
+
+### Automation & Monitoring
+
+**1. Monitoring (Détection de drift)**
+
+```bash
+# Random Forest
+docker-compose exec app python src/mlops/monitor_drift.py --model rf
+
+# SVD
+docker-compose exec app python src/mlops/monitor_drift.py --model svd
+```
+
+**2. Orchestrateur (Monitoring + Réentraînement auto)**
+L'orchestrateur lance le monitoring et déclenche un réentraînement si un drift est détecté.
+
+```bash
+# Pipeline Random Forest
+docker-compose exec app python src/mlops/orchestrator.py --model rf
+
+# Pipeline SVD
+docker-compose exec app python src/mlops/orchestrator.py --model svd
+```
 
 ---
 
