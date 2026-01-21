@@ -1,6 +1,7 @@
 import sys
 import os
 import ast
+import json
 import random
 import logging
 from dotenv import load_dotenv
@@ -377,11 +378,22 @@ def train_svd():
     mlflow.set_experiment(EXPERIMENT_NAME)
 
     with mlflow.start_run(run_name="SVD_Collaborative_Filtering"):
-        algo = SVD()
-        # Log default params for SVD as they are not explicitly set
-        params = {"n_factors": 100, "n_epochs": 20, "lr_all": 0.005, "reg_all": 0.02}
+        # 1. Load Optimized Params if available
+        params_path = "src/models/svd_best_params.json"
+        if os.path.exists(params_path):
+            logger.info(f"   ⚙️  Loading optimized SVD parameters from {params_path}...")
+            with open(params_path, "r") as f:
+                best_params = json.load(f)
+            # Ensure keys match SVD arguments
+            params = best_params
+        else:
+            logger.info("   ⚙️  Using default SVD parameters.")
+            params = {"n_factors": 100, "n_epochs": 20, "lr_all": 0.005, "reg_all": 0.02}
+        
         mlflow.log_params(params)
 
+        # 2. Train Model
+        algo = SVD(**params)
         algo.fit(trainset)
         predictions = algo.test(testset)
         svd_rmse = surprise.accuracy.rmse(predictions, verbose=False)
