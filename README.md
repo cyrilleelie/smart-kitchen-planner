@@ -14,10 +14,11 @@
 
 | Fonctionnalité | Description |
 |----------------|-------------|
-| 🧠 **Recommandations IA** | Modèle Random Forest entraîné sur les interactions utilisateurs |
+| 🧠 **Recommandation Hybride** | **Collaborative (SVD)** pour la personnalisation & **Content-Based (Random Forest)** pour le contexte (temps/saison) |
+| 🔄 **Stratégie 80/20** | Mix équilibré entre recettes performantes (80%) et découvertes (20%) pour éviter la routine |
 | 🔍 **Recherche Sémantique** | Embeddings Sentence-BERT (384 dimensions) pour comprendre le sens des recettes |
 | ⚖️ **Contraintes Nutritionnelles** | Respect des cibles caloriques et du temps de préparation |
-| 📊 **MLOps Intégré** | Suivi des expériences avec MLflow, détection du drift avec Evidently |
+| 📊 **MLOps Intégré** | Tracking des expériences avec MLflow (Random Forest & SVD), détection du drift avec Evidently |
 | 🛡️ **Sécurité API** | Rate Limiting (slowapi), CORS configuré, paramètres externalisés |
 
 ---
@@ -132,8 +133,8 @@ docker-compose exec app python src/scripts/reset_persona.py Captain_Nemo
 
 | Méthode | Endpoint | Description | Rate Limit |
 |---------|----------|-------------|------------|
-| `POST` | `/recommend` | Recommandations contextuelles (ML) | 30/min |
-| `POST` | `/generate-planning` | Planning avec stratégie Batch & Split | 10/min |
+| `POST` | `/recommend` | Recommandations contextuelles (Content-Based ou Collaborative) | 30/min |
+| `POST` | `/generate-planning` | Planning complet (jours, repas, calories, stratégie) | 10/min |
 | `PUT` | `/user/{id}/preferences` | Met à jour les préférences | 50/min |
 | `POST` | `/feedback` | Enregistre une note utilisateur | - |
 | `GET` | `/explore` | Découvrir de nouvelles recettes | - |
@@ -194,8 +195,11 @@ docker-compose restart app
 # Arrêter la stack
 docker-compose down
 
-# Entraîner le modèle ML
-docker-compose exec app python src/mlops/train_model.py
+# Entraîner le modèle ML (Random Forest par défaut)
+docker-compose exec app python src/mlops/train_model.py --pipeline rf
+
+# Entraîner le modèle de Collaborative Filtering (SVD)
+docker-compose exec app python src/mlops/train_model.py --pipeline svd
 
 # Vérifier le drift des données
 docker-compose exec app python src/mlops/monitor_drift.py
@@ -219,10 +223,12 @@ docker-compose exec app python src/mlops/orchestrator.py
 
 Le projet intègre un pipeline MLOps complet :
 
-1. **Entraînement** : Random Forest sur interactions contextuelles
-2. **Tracking** : Paramètres, métriques (RMSE, MAE) et artefacts dans MLflow
-3. **Inférence** : Chargement automatique du dernier modèle
-4. **Monitoring** : Détection du drift avec Evidently (KS-test)
+1. **Entraînement Multi-Modèle** :
+    - **Random Forest (rf)** : Apprentissage contextuel (Heure, Saison, Profil) sur vecteurs sémantiques.
+    - **SVD (svd)** : Filtrage collaboratif pur (Matrix Factorization) pour la personnalisation.
+2. **Tracking** : Paramètres, métriques (RMSE, MAE) et artefacts dans MLflow.
+3. **Inférence** : Sélection dynamique de la stratégie (Content-Based vs Collaborative).
+4. **Monitoring** : Détection du drift avec Evidently (KS-test).
 
 ---
 
