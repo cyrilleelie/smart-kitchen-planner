@@ -307,13 +307,16 @@ def train():
         logger.info("   💾 Sauvegarde de la Reference Data pour Evidently...")
 
         # On reconstitue un DataFrame propre pour le futur monitoring
-        # On sauve X_train (features) + y_train (target réelle)
-        # C'est ce que le modèle "connaît" par coeur.
+        # On sauve X_train (features) + y_train (target réelle) + prediction
+
+        # 1. Calcul des prédictions sur le jeu d'entraînement (Reference)
+        train_preds = model.predict(X_train)
 
         # Note: X_train est un numpy array, on le convertit en DF pour plus de clarté
-        # Idéalement, nomme tes colonnes si tu peux, sinon des indices suffisent
         ref_df = pd.DataFrame(X_train)
+        ref_df.columns = ref_df.columns.astype(str)  # Force string headers
         ref_df["target"] = y_train
+        ref_df["prediction"] = train_preds
 
         # On sauvegarde en CSV localement puis on l'envoie sur MLflow
         ref_path = "reference_data.csv"

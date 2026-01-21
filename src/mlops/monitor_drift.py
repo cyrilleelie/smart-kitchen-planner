@@ -5,11 +5,11 @@ import json
 import mlflow
 import argparse
 from datetime import datetime, timedelta
+
+
 from sqlalchemy.orm import Session
 from evidently.report import Report
-from evidently.metric_preset import DataDriftPreset
-from evidently.test_preset import DataDriftTestPreset
-from evidently.tests import TestColumnDrift
+from evidently.metrics import DatasetDriftMetric, DataDriftTable
 
 from dotenv import load_dotenv
 
@@ -38,16 +38,6 @@ def get_last_run_info(model_type="rf"):
     experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
     if not experiment:
         return None, None
-
-    # Filter by model specific run name if possible, or just look for artifacts
-    # Simplification: we search for the last finished run.
-    # Ideally runs should be tagged with 'model_type'.
-    # For now, we assume the last run is the one we want or we try to find the one with the right artifact.
-    # But to be robust, let's assume runs are homogeneous or we take the latest.
-    # Updated strategy: Search specifically for runs that might have the reference artifact.
-
-    # If model_type is svd, we look for runs named "SVD_Collaborative_Filtering" (defined in train_model.py)
-    # If rf, we look for unnamed or standard runs? train_model.py doesn't set a run_name for RF.
 
     filter_string = "attributes.status = 'FINISHED'"
     if model_type == "svd":
@@ -80,8 +70,6 @@ def load_reference_data(run_id, model_type="rf"):
         return pd.read_csv(local_path)
     except Exception as e:
         print(f"   ⚠️ Erreur chargement référence ({model_type}): {e}")
-        # For SVD, if we didn't save reference data in previous implementations, this will fail.
-        # We might handle this gracefully or expect the user to re-train.
         return None
 
 
@@ -110,17 +98,26 @@ def get_user_vector(session, user_id):
     return np.mean(vectors, axis=0).astype(np.float32)
 
 
-def fetch_prediction_logs(days=7, model_type="rf"):
+def fetch_prediction_logs(start_days=7, end_days=0, model_type="rf"):
     """
-    Récupère les logs de production.
+    Récupère les logs de production sur une fenêtre glissante.
+    :param start_days: Début de la fenêtre (jours avant aujourd'hui)
+    :param end_days: Fin de la fenêtre (jours avant aujourd'hui, 0 = maintenant)
     """
-    print(f"   📡 Récupération logs (7 derniers jours) pour {model_type}...")
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    print(
+        f"   📡 Récupération logs (J-{start_days} à J-{end_days}) pour {model_type}..."
+    )
+
+    start_date = datetime.utcnow() - timedelta(days=start_days)
+    end_date = datetime.utcnow() - timedelta(days=end_days)
 
     with Session(engine) as session:
         logs = (
             session.query(PredictionLog)
-            .filter(PredictionLog.timestamp >= cutoff_date)
+            .filter(
+                PredictionLog.timestamp >= start_date,
+                PredictionLog.timestamp < end_date,
+            )
             .order_by(PredictionLog.timestamp.asc())
             .all()
         )
@@ -129,8 +126,6 @@ def fetch_prediction_logs(days=7, model_type="rf"):
             return pd.DataFrame()
 
         rows = []
-
-        # Caches
         user_vec_cache = {}
         recipe_cache = {}
 
@@ -142,29 +137,11 @@ def fetch_prediction_logs(days=7, model_type="rf"):
                     else log.input_features
                 )
 
-                # Check if this log matches the expected model type implicitly?
-                # The logger might not differentiate, so we filter by structure if needed.
-                # For now, we process everything that looks compatible.
-
                 if model_type == "rf":
-                    # RF expects: user_vec + recipe_vec + context
-                    # If logs don't have this structure, skip?
-                    # Assuming logs are consistent or we filter valid ones.
+                    # RF Logic (Features + Prediction)
 
+                    # 1. Inputs & Context
                     u_id = log.user_id
-                    r_id = inputs.get("recipe_id")  # stored in inputs for consistency?
-                    # Actually inputs for RF usually contain 'meal_type', 'season'.
-                    # train_model.py uses logic to fetch u/r vectors.
-                    # InferenceService for RF logs inputs?
-                    # Wait, PredictionLog usually logs 'input_features' as passed to predict?
-                    # In InferenceService.recommend:
-                    #   preds = self.model.predict(X_pred)
-                    # It does NOT log to database automatically in the provided snippets!
-                    # I assume there's a logging mechanism elsewhere or it's implicitly expected.
-                    # Looking at `monitor_drift.py` provided earlier:
-                    # It reconstructs vectors from IDs in the logs.
-                    # Let's assume PredictionLog.input_features contains {recipe_id, meal_type, season}
-
                     r_id = inputs.get("recipe_id")
                     if r_id is None:
                         continue
@@ -172,7 +149,7 @@ def fetch_prediction_logs(days=7, model_type="rf"):
                     meal = inputs.get("meal_type", 1)
                     season = inputs.get("season", 0)
 
-                    # Hydration
+                    # Hydration (Vectors)
                     if u_id not in user_vec_cache:
                         user_vec_cache[u_id] = get_user_vector(session, u_id)
                     u_vec = user_vec_cache[u_id]
@@ -184,45 +161,31 @@ def fetch_prediction_logs(days=7, model_type="rf"):
                         )
                     r_vec = recipe_cache[r_id]
 
+                    # Reconstruction [User(384) + Recipe(384) + Context(2)]
                     ctx_vec = np.array([float(meal), float(season)], dtype=np.float32)
                     full_vec = np.concatenate([u_vec, r_vec, ctx_vec])
                     row_dict = {str(i): val for i, val in enumerate(full_vec)}
+
+                    # Add Prediction Score
+                    pred_res = (
+                        json.loads(log.prediction_result)
+                        if isinstance(log.prediction_result, str)
+                        else log.prediction_result
+                    )
+                    predicted_score = pred_res.get("score") if pred_res else None
+                    row_dict["prediction"] = (
+                        predicted_score if predicted_score is not None else np.nan
+                    )
+
                     rows.append(row_dict)
 
                 elif model_type == "svd":
-                    # SVD expects: rating (target) and prediction.
-                    # PredictionLog stores: prediction_score (log.prediction_score?)
-                    # Wait, PredictionLog model in `src/database/models.py` is needed to know fields.
-                    # Assuming `prediction_score` field exists or similar.
-                    # If `prediction_score` is the score.
-                    # For target (actual rating), we need to join with Interaction?
-                    # But drift detection is usually on Model Inputs vs Reference Inputs, OR Model Outputs vs Reference Outputs.
-                    # Monitor Target Drift requires Ground Truth (Feedback).
-                    # 'fetch_prediction_logs' usually fetches *Production Inputs/Outputs*.
-                    # Ground truth might come later.
-                    # The prompt says: "Cas svd: Charge uniquement les interactions : rating (Target) et prediction (Output)."
-                    # "Prediction" comes from logs. "Rating" comes from Interaction (feedback).
-                    # We should probably join PredictionLog with Interaction on user_id/recipe_id?
-                    # Or just fetch Interactions that have happened?
-                    # "Charge uniquement les interactions : rating (Target) et prediction (Output)."
-                    # Maybe we just compare "training interactions" vs "recent interactions"?
-                    # "Drift" on "Rating" = Concept Drift (Target Drift).
-                    # "Drift" on "Prediction" = Prediction Drift.
-                    # If we use SVD, the "model" predicts a score.
-                    # Let's try to match PredictionLog with Interaction if possible,
-                    # OR just use recent Interactions as "Current Data" for Target Drift?
-                    # If we just want Data Drift on inputs/outputs:
-                    # For SVD, inputs are UserID/RecipeID (excluded per instructions).
-                    # Outputs are scores.
-                    # Target is Ratng.
-                    # So we need dataframe with columns: ["prediction", "rating"] (if available).
-
-                    # Let's look for matching interactions
+                    # SVD Logic (Prediction + Rating)
+                    u_id = log.user_id
                     r_id = inputs.get("recipe_id")
                     if r_id is None:
                         continue
 
-                    # Correctly parse prediction_result to get score
                     pred_res = (
                         json.loads(log.prediction_result)
                         if isinstance(log.prediction_result, str)
@@ -231,18 +194,21 @@ def fetch_prediction_logs(days=7, model_type="rf"):
                     predicted_score = pred_res.get("score") if pred_res else None
 
                     # Try to find real interaction
-                    # This might be expensive N+1 query, but for monitoring 7 days it's okay-ish.
                     interaction = (
                         session.query(Interaction)
                         .filter_by(user_id=u_id, recipe_id=r_id)
                         .first()
                     )
 
-                    row = {"prediction": predicted_score if predicted_score is not None else np.nan}
+                    row = {
+                        "prediction": (
+                            predicted_score if predicted_score is not None else np.nan
+                        )
+                    }
                     if interaction:
                         row["rating"] = interaction.rating
                     else:
-                        row["rating"] = np.nan  # No ground truth yet
+                        row["rating"] = np.nan
 
                     rows.append(row)
 
@@ -261,93 +227,153 @@ def monitor(model_type="rf"):
         print(f"   ❌ Aucun modèle {model_type} trouvé ds MLflow.")
         return STATUS_SKIPPED
 
+    # 1. Infos dernier modèle
+    run_id, last_train_date = get_last_run_info(model_type)
+    if not run_id:
+        print(f"   ❌ Aucun modèle {model_type} trouvé ds MLflow.")
+        # On continue quand même pour le monitoring "sliding window" purement production ?
+        # Non, on garde l'info mais la référence change.
+
     print(f"   📅 Modèle de référence du : {last_train_date}")
 
-    # 2. Chargement données Référence (Training)
-    ref_df = load_reference_data(run_id, model_type)
-    if ref_df is None or ref_df.empty:
-        print("   ❌ Données de référence introuvables ou vides.")
-        return STATUS_SKIPPED
+    # 2. Chargement données : SLIDING WINDOW STRATEGY
+    # Au lieu de comparer Training vs Prod, on compare Prod(J-14 à J-7) vs Prod(J-7 à J-0).
+    # Cela annule le biais de sélection du recommender.
 
-    # 3. Chargement données Production (Logs DB)
-    curr_df = fetch_prediction_logs(days=7, model_type=model_type)
+    # Current: [J-7, Today]
+    curr_df = fetch_prediction_logs(start_days=7, end_days=0, model_type=model_type)
+
+    # Reference: [J-14, J-7]
+    ref_df = fetch_prediction_logs(start_days=14, end_days=7, model_type=model_type)
 
     if curr_df.empty:
-        print("   Bzzt... 💤 Aucune donnée récente en production.")
+        print("   Bzzt... 💤 Aucune donnée récente en production (J-7 à J-0).")
         return STATUS_SKIPPED
 
-    print(f"   📊 Volume : {len(ref_df)} (Ref) vs {len(curr_df)} (Prod)")
+    if ref_df.empty:
+        print("   ⚠️ Pas assez d'historique (J-14 à J-7) pour comparaison glissante.")
+        # Fallback: On pourrait utiliser le Training set, mais l'utilisateur refuse le biais.
+        # Donc on SKIP pour éviter de trigger un réentraînement inutile au démarrage.
+        print("   ⏭️ SKIP : En attente de plus de données pour établir une baseline.")
+        return STATUS_SKIPPED
+
+    print(
+        f"   📊 Volume : {len(ref_df)} (Ref: J-14->J-7) vs {len(curr_df)} (Curr: J-7->J-0)"
+    )
 
     # 4. Config & Mapping
     report_metrics = []
 
     if model_type == "rf":
-        # Random Forest Config
-        # Alignement colonnes
+        # RANDOM FOREST STRATEGY (Hybrid: Features + Prediction Filtered)
+
+        # A. Filter Reference by Prediction Score (Anti-Selection Bias)
+        # WITH SLIDING WINDOW (Prod vs Prod), bias is consistent, so no need to filter.
+        # We compare "Recent Recommendations" vs "Previous Recommendations".
+
+        # B. Prepare Feature Columns
+        # Ref columns are "0", "1", ..., "769", "target", "prediction"
         ref_df.columns = ref_df.columns.astype(str)
         curr_df.columns = curr_df.columns.astype(str)
 
-        common_cols = list(set(ref_df.columns) & set(curr_df.columns))
-        # Exclure target si présente
-        if "target" in common_cols:
-            common_cols.remove("target")
+        # Identify numerical embeddings (0-767) vs categorical context (768, 769)
+        # Total 770 features.
+        # 0-767: Embeddings (Numerical) -> KS Test
+        # 768: Meal (Categorical) -> Chi-Square
+        # 769: Season (Categorical) -> Chi-Square
 
-        features_to_monitor = sorted(
-            common_cols, key=lambda x: int(x) if x.isdigit() else x
-        )
+        features_to_monitor = []
+        for i in range(770):
+            col_name = str(i)
+            if col_name in ref_df.columns and col_name in curr_df.columns:
+                features_to_monitor.append(col_name)
 
         if not features_to_monitor:
-            print("   ⚠️ Aucune colonne commune.")
+            print("   ⚠️ Aucune feature commune trouvée.")
             return STATUS_SKIPPED
 
         # Select data
-        ref_data = ref_df[features_to_monitor]
-        curr_data = curr_df[features_to_monitor]
+        ref_data = ref_df[features_to_monitor].copy()  # Ensure copy
+        curr_data = curr_df[features_to_monitor].copy()
 
-        # Define Tests
-        # Embeddings (Numerical) -> KS
-        # Context (Categorical: Season, Meal) -> Chi-Square
-        # Usually last 2 columns are context if constructed same way
-        # But here names are "0", "1"... "769".
-        # Last 2 are 768 (Meal) and 769 (Season).
+        print(
+            f"   📉 Features analysées : {len(features_to_monitor)} colonnes (Embeddings + Context)"
+        )
 
-        # Let's detect categorical logic manually or just force it.
-        # It's hard to distinguish by name "768".
+        # C. Configure Tests
+        # Use DatasetDriftMetric for a summary report instead of individual ColumnDriftMetric
+        # Map columns to specific tests using DataDriftOptions
 
+        per_column_stattest = {}
+        for col in features_to_monitor:
+            idx = int(col)
+            if idx >= 768:
+                # Categorical (Context)
+                ref_data[col] = ref_data[col].astype(str)
+                curr_data[col] = curr_data[col].astype(str)
+                per_column_stattest[col] = "chisquare"
+            else:
+                # Numerical (Embeddings)
+                per_column_stattest[col] = "ks"
+
+        # Add DatasetDriftMetric (Summary) using explicit per-column tests
+        # We set stattest_threshold to 0.01 (1%) instead of 0.05 to reduce false positives
+        # due to the natural selection bias of the recommender (Exploration vs Exploitation).
         report_metrics.append(
-            DataDriftPreset(
-                drift_share=0.5,  # Alert if 50% features drift
-                # stattest="ks", # Default
+            DatasetDriftMetric(
+                columns=features_to_monitor,
+                per_column_stattest=per_column_stattest,
+                stattest_threshold=0.01,
+            )
+        )
+
+        # Add DataDriftTable for detailed (but concise) list of drifting features.
+        report_metrics.append(
+            DataDriftTable(
+                columns=features_to_monitor,
+                per_column_stattest=per_column_stattest,
+                stattest_threshold=0.01,
             )
         )
 
     elif model_type == "svd":
-        # SVD Config
-        # Ref columns: rating, prediction (if saved correctly)
-        # Curr columns: rating, prediction
+        # SVD STRATEGY (Predictions & Target)
 
-        # We need to make sure Ref DF has these columns.
-        # If train_model.py for SVD saved 'user_id', 'recipe_id', 'rating', 'prediction'
-        # We filter only rating and prediction.
+        # A. Filter Reference (Anti-Selection Bias) - NOT NEEDED for Sliding Window
 
         cols = ["rating", "prediction"]
         available = [c for c in cols if c in ref_df.columns and c in curr_df.columns]
 
         if not available:
-            print("   ⚠️ Colonnes rating/prediction manquantes pour SVD.")
+            print(f"   ⚠️ Colonnes {cols} manquantes pour SVD.")
             return STATUS_SKIPPED
 
         ref_data = ref_df[available].dropna()
         curr_data = curr_df[available].dropna()
 
-        # Wasserstein for distribution drift
-        # Evidently: TestColumnDrift(column_name="rating", stattest="wasserstein")
+        print(f"   📉 Colonnes analysées : {available}")
 
-        tests = []
+        per_column_stattest = {}
         for col in available:
-            tests.append(TestColumnDrift(column_name=col, stattest="wasserstein"))
+            per_column_stattest[col] = "wasserstein"
 
-        report_metrics.append(DataDriftTestPreset(tests=tests))
+        # Add DatasetDriftMetric (Summary)
+        report_metrics.append(
+            DatasetDriftMetric(
+                columns=available,
+                per_column_stattest=per_column_stattest,
+                stattest_threshold=0.1,
+            )
+        )
+
+        # Add DataDriftTable (Detail)
+        report_metrics.append(
+            DataDriftTable(
+                columns=available,
+                per_column_stattest=per_column_stattest,
+                stattest_threshold=0.1,
+            )
+        )
 
     # 5. Calcul Drift
     report = Report(metrics=report_metrics)
@@ -360,7 +386,6 @@ def monitor(model_type="rf"):
 
     # Export
     timestamp = datetime.now().strftime("%Y-%m-%d_%Hh%M")
-    # Use subdirectory for model type
     report_dir = os.path.join("reports", model_type)
     os.makedirs(report_dir, exist_ok=True)
 
@@ -368,42 +393,44 @@ def monitor(model_type="rf"):
     report.save_html(report_path)
     print(f"   📝 Rapport généré : {report_path}")
 
-    # Interpretation simplifiée du résultat
-    # On regarde si 'fail' dans le json summary
-    json_summary = json.loads(report.json())
-    # Evidently structure depends on preset.
-    # Usually 'metrics' -> 'result' -> 'drift_detected' for DataDriftPreset
-    # For TestPreset: 'tests' -> 'status' -> 'FAIL'
-
+    # Interpretation
     drift_detected = False
-
-    if "metrics" in json_summary:
-        # Check DataDriftPreset results if present
-        # This is heuristics structure parsing
-        pass
-
-    # Simple check: if any test/metric failed/detected drift
-    # report.as_dict() is safer
     res = report.as_dict()
 
     # Check for Tests FAIL
-    if "tests" in res:
-        for t in res["tests"]:
-            if t["status"] == "FAIL":
-                drift_detected = True
-                break
-
-    # Check for Metrics Drift
     if "metrics" in res:
         for m in res["metrics"]:
-            if "result" in m and m["result"].get("dataset_drift", False):
-                drift_detected = True
+            # DatasetDriftMetric specific logic
+            if m["metric"] == "DatasetDriftMetric":
+                n_drifted = m["result"]["number_of_drifted_columns"]
+                share_drifted = m["result"]["share_of_drifted_columns"]
+                n_features = m["result"]["number_of_columns"]
+                # evidently 0.4: 'dataset_drift' boolean.
+                drift_detected_metric = m["result"].get(
+                    "dataset_drift", m["result"].get("drift_detected", False)
+                )
+
+                print("   📊 Détails DatasetDriftMetric :")
+                print(
+                    f"      - Colonnes en drift : {n_drifted} / {n_features} ({share_drifted:.2%})"
+                )
+                print(
+                    f"      - Statut Global : {'🔴 DRIFT' if drift_detected_metric else '✅ OK'}"
+                )
+
+                if drift_detected_metric:
+                    drift_detected = True
+
+            # Other metrics (ColumnDriftMetric, etc.)
+            elif "result" in m and m["result"].get("drift_detected", False):
+                # For DataDriftTable, it interprets drift based on same logic usually
+                pass
 
     if drift_detected:
-        print("   ⚠️ DRIFT DÉTECTÉ !")
+        print("   ⚠️ DRIFT DÉTECTÉ (Global) !")
         return STATUS_DRIFT
 
-    print("   ✅ Pas de drift détecté.")
+    print("   ✅ Pas de drift détecté (Global).")
     return STATUS_OK
 
 

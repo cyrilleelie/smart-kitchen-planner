@@ -99,23 +99,42 @@ docker-compose ps
 
 ### Initialisation des Données
 
+#### Step 1 : Base de données & Recettes
 ```bash
 # Créer les tables, charger les recettes et générer les embeddings
 docker-compose exec app python src/scripts/init_db.py
 
-# Charger des recettes supplémentaires (batch de 1000 par défaut) et générer les embeddings
+# (Optionnel) Charger des recettes supplémentaires
+# Arguments : --count <nombre_de_recettes>
 docker-compose exec app python src/scripts/load_recipes.py --count 1000
+```
 
-# Charger un utilisateur avec un profil prédéfini (persona) et génère des interactions en fonction du profil (nombre en paramètre dans le fichier json)
-# Exemples de personas disponibles dans data/personas/
-docker-compose exec app python src/scripts/inject_persona.py data/personas/sportif.json
+#### Step 2 : Utilisateurs & Personas
+```bash
+# Initialiser TOUS les utilisateurs définis dans data/personas/
+# Cela crée les comptes et génère un historique initial d'interactions
+docker-compose exec app python src/scripts/init_personas.py
 
-# Ajouter des interactions supplémentaires à un utilisateur existant
-# Arguments : <username> <nombre> <chemin_persona>
-docker-compose exec app python src/scripts/add_interactions.py Captain_Nemo 50 data/personas/captain_nemo.json
+# (Manuel) Charger un persona spécifique
+# Arguments : <nom_persona> (fichier sans extension dans data/personas/)
+docker-compose exec app python src/scripts/inject_persona.py captain_nemo
 
-# Réinitialiser un persona (Pour supprimer un user et toutes ses interactions)
-docker-compose exec app python src/scripts/reset_persona.py Captain_Nemo
+# (Manuel) Ajouter des interactions supplémentaires
+# Arguments : <nom_persona> <nombre_interactions>
+docker-compose exec app python src/scripts/add_interactions.py captain_nemo 50
+
+# (Manuel) Supprimer un utilisateur et tout son historique (interactions & logs)
+# Arguments : <username>
+docker-compose exec app python src/scripts/delete_user.py captain_nemo
+```
+
+#### Step 3 : Simulation & Monitoring
+```bash
+
+# Simuler une activité historique (Logs + Interactions) pour tester le monitoring
+# Scanne data/personas/ pour trouver les utilisateurs correspondants
+# Arguments : --start YYYY-MM-DD --end YYYY-MM-DD --interactions <N> --simulations <M>
+docker-compose exec app python src/scripts/simulate_activity.py --start 2026-01-01 --end 2026-01-31 --interactions 5 --simulations 10
 
 ```
 
@@ -196,9 +215,11 @@ docker-compose restart app
 docker-compose down
 
 # Entraîner le modèle ML (Random Forest par défaut)
+# Arguments : --pipeline <rf|svd>
 docker-compose exec app python src/mlops/train_model.py --pipeline rf
 
 # Entraîner le modèle de Collaborative Filtering (SVD)
+# Arguments : --pipeline <rf|svd>
 docker-compose exec app python src/mlops/train_model.py --pipeline svd
 
 # Voir la section MLOps pour le Monitoring et l'Orchestration
@@ -235,9 +256,11 @@ Le projet intègre un pipeline MLOps complet :
 
 ```bash
 # Random Forest
+# Arguments : --model <rf|svd>
 docker-compose exec app python src/mlops/monitor_drift.py --model rf
 
 # SVD
+# Arguments : --model <rf|svd>
 docker-compose exec app python src/mlops/monitor_drift.py --model svd
 ```
 
@@ -246,9 +269,11 @@ L'orchestrateur lance le monitoring et déclenche un réentraînement si un drif
 
 ```bash
 # Pipeline Random Forest
+# Arguments : --model <rf|svd>
 docker-compose exec app python src/mlops/orchestrator.py --model rf
 
 # Pipeline SVD
+# Arguments : --model <rf|svd>
 docker-compose exec app python src/mlops/orchestrator.py --model svd
 ```
 
