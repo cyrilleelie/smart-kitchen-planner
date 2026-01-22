@@ -92,18 +92,37 @@ def add_interactions(username: str, count: int, persona_path: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Add random interactions to an existing user based on persona rules."
+        description="Add random interactions to an existing user based on persona rules (from data/personas/)."
     )
-    parser.add_argument("username", type=str, help="Username of the existing user")
+    parser.add_argument(
+        "persona_name",
+        type=str,
+        help="Name of the persona file (without extension, e.g. 'captain_nemo')",
+    )
     parser.add_argument(
         "count", type=int, help="Number of new interactions to generate"
-    )
-    parser.add_argument(
-        "persona_file",
-        type=str,
-        help="Path to the JSON persona file containing behavior rules",
     )
 
     args = parser.parse_args()
 
-    add_interactions(args.username, args.count, args.persona_file)
+    # Construct path: data/personas/{name}.json
+    base_dir = os.path.join(os.getcwd(), "data", "personas")
+    filename = f"{args.persona_name}.json"
+    full_path = os.path.join(base_dir, filename)
+
+    if not os.path.exists(full_path):
+        print(f"❌ Error: Persona file '{full_path}' not found.")
+        sys.exit(1)
+
+    # Load persona to get target username
+    try:
+        persona_data = load_persona(full_path)
+        target_username = persona_data.get("username")
+        if not target_username:
+            print(f"❌ Error: No 'username' field found in {filename}.")
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ Error loading persona: {e}")
+        sys.exit(1)
+
+    add_interactions(target_username, args.count, full_path)

@@ -3,14 +3,13 @@ import os
 import json
 import random
 import argparse
-from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import text
 
 # Configuration des chemins
 sys.path.append(os.getcwd())
 from src.database.connection import engine  # noqa: E402
-from src.database.models import User, Recipe, Interaction  # noqa: E402
+from src.database.models import User  # noqa: E402
 from src.utils.translations import PREFERENCE_TAGS_MAP  # noqa: E402
 
 # Création du mapping inverse : EN -> FR
@@ -119,59 +118,76 @@ def inject_data(json_file):
                 f"   👤 Utilisateur existant trouvé : {user.username} (ID: {user.id})"
             )
 
-        # B. Récupération des recettes
-        # On mélange aléatoirement pour ne pas toujours noter les mêmes
-        all_recipes = session.query(Recipe).order_by(func.random()).all()
-
-        target_count = persona["interaction_count"]
-        if len(all_recipes) < target_count:
-            print(
-                f"   ⚠️ Attention : La base ne contient que {len(all_recipes)} recettes. On notera tout."
-            )
-            target_count = len(all_recipes)
-
-        # C. Génération des interactions cohérentes
-        print(f"   🧠 Analyse et notation de {target_count} recettes...")
-
-        interactions_added = 0
-        rules = persona["behavior_rules"]
-
-        for recipe in all_recipes[:target_count]:
-            # Vérifie si l'interaction existe déjà pour éviter les doublons DB
-            existing = (
-                session.query(Interaction)
-                .filter(
-                    Interaction.user_id == user.id, Interaction.recipe_id == recipe.id
-                )
-                .first()
-            )
-
-            if existing:
-                continue
-
-            # Calcul de la note "intelligente"
-            rating = analyze_recipe_taste(recipe, rules)
-
-            interaction = Interaction(
-                user_id=user.id,
-                recipe_id=recipe.id,
-                rating=rating,
-                date=datetime.utcnow(),  # Date fraîche pour le monitoring
-            )
-            session.add(interaction)
-            interactions_added += 1
-
-        session.commit()
+        # B. Récupération des recettes (Désactivé : Simulation via simulate_activity.py)
+        # ------------------------------------------------------------------------------------------------
+        # # On mélange aléatoirement pour ne pas toujours noter les mêmes
+        # all_recipes = session.query(Recipe).order_by(func.random()).all()
+        #
+        # target_count = persona["interaction_count"]
+        # if len(all_recipes) < target_count:
+        #     print(
+        #         f"   ⚠️ Attention : La base ne contient que {len(all_recipes)} recettes. On notera tout."
+        #     )
+        #     target_count = len(all_recipes)
+        #
+        # # C. Génération des interactions cohérentes
+        # print(f"   🧠 Analyse et notation de {target_count} recettes...")
+        #
+        # interactions_added = 0
+        # rules = persona["behavior_rules"]
+        #
+        # for recipe in all_recipes[:target_count]:
+        #     # Vérifie si l'interaction existe déjà pour éviter les doublons DB
+        #     existing = (
+        #         session.query(Interaction)
+        #         .filter(
+        #             Interaction.user_id == user.id, Interaction.recipe_id == recipe.id
+        #         )
+        #         .first()
+        #     )
+        #
+        #     if existing:
+        #         continue
+        #
+        #     # Calcul de la note "intelligente"
+        #     rating = analyze_recipe_taste(recipe, rules)
+        #
+        #     interaction = Interaction(
+        #         user_id=user.id,
+        #         recipe_id=recipe.id,
+        #         rating=rating,
+        #         date=datetime.utcnow(),  # Date fraîche pour le monitoring
+        #     )
+        #     session.add(interaction)
+        #     interactions_added += 1
+        #
+        # session.commit()
+        # print(
+        #     f"   ✅ Injection terminée ! {interactions_added} nouvelles interactions ajoutées."
+        # )
+        # ------------------------------------------------------------------------------------------------
         print(
-            f"   ✅ Injection terminée ! {interactions_added} nouvelles interactions ajoutées."
+            f"   ✅ Utilisateur {user.username} initialisé (Interactions désactivées dans ce script)."
         )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Injecte des données utilisateur simulées via JSON"
+        description="Injecte des données utilisateur simulées via JSON (dans data/personas/)"
     )
-    parser.add_argument("json_file", help="Chemin vers le fichier JSON du persona")
+    parser.add_argument(
+        "persona_name", help="Nom du fichier persona (sans extension, ex: 'sportif')"
+    )
     args = parser.parse_args()
 
-    inject_data(args.json_file)
+    # Construct path: data/personas/{name}.json
+    base_dir = os.path.join(os.getcwd(), "data", "personas")
+    filename = f"{args.persona_name}.json"
+    full_path = os.path.join(base_dir, filename)
+
+    if not os.path.exists(full_path):
+        print(f"❌ Erreur : Le fichier '{full_path}' n'existe pas.")
+        print(f"   Dossier scanné : {base_dir}")
+        sys.exit(1)
+
+    inject_data(full_path)

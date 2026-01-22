@@ -1,21 +1,70 @@
 {
-  "username": "Mamma_Mia_2026",
-  "preferences": ["italian", "pasta", "comfort_food", "cheese"],
+  "username": "mamma_mia",
+  "preferences": [
+    "italian",
+    "pasta",
+    "comfort_food",
+    "cheese"
+  ],
   "interaction_count": 900,
   "behavior_rules": {
     "likes": {
-      "keywords": ["pasta", "spaghetti", "pizza", "cheese", "parmesan", "tomato", "basil", "lasagna", "mozzarella", "risotto", "olive", "italian", "noodles", "cream", "alfredo"],
-      "rating_dist": [4.0, 5.0],
-      "weights": [0.3, 0.7]
+      "keywords": [
+        "pasta",
+        "spaghetti",
+        "pizza",
+        "cheese",
+        "parmesan",
+        "tomato",
+        "basil",
+        "lasagna",
+        "mozzarella",
+        "risotto",
+        "olive",
+        "italian",
+        "noodles",
+        "cream",
+        "alfredo"
+      ],
+      "rating_dist": [
+        4.0,
+        5.0
+      ],
+      "weights": [
+        0.3,
+        0.7
+      ]
     },
     "dislikes": {
-      "keywords": ["tofu", "vegan", "soy", "curry", "spicy", "asian", "stir fry", "low fat", "diet", "salad", "raw"],
-      "rating_dist": [1.0, 2.0],
-      "weights": [0.8, 0.2]
+      "keywords": [
+        "tofu",
+        "vegan",
+        "soy",
+        "curry",
+        "spicy",
+        "asian",
+        "stir fry",
+        "low fat",
+        "diet",
+        "salad",
+        "raw"
+      ],
+      "rating_dist": [
+        1.0,
+        2.0
+      ],
+      "weights": [
+        0.8,
+        0.2
+      ]
     },
     "neutral": {
-      "rating_dist": [3.0],
-      "weights": [1.0]
+      "rating_dist": [
+        3.0
+      ],
+      "weights": [
+        1.0
+      ]
     }
   }
 }

@@ -10,37 +10,35 @@ st.set_page_config(page_title="Monitoring Drift", page_icon="📈", layout="wide
 st.title("📈 Pilotage MLOps (Drift & Training)")
 
 # --- CONFIGURATION ---
-REPORT_DIR = "reports"
+REPORT_BASE_DIR = "reports"
 MONITOR_SCRIPT = "src/mlops/monitor_drift.py"
 TRAIN_SCRIPT = "src/mlops/train_model.py"
 
-if not os.path.exists(REPORT_DIR):
-    os.makedirs(REPORT_DIR)
 
 # --- FONCTIONS ---
 
 
-def run_analysis_process():
+def run_analysis_process(model_type):
     """Exécute le script et retourne le résultat brut"""
-    return subprocess.run(
-        [sys.executable, MONITOR_SCRIPT], capture_output=True, text=True
-    )
+    cmd = [sys.executable, MONITOR_SCRIPT, "--model", model_type]
+    return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def run_training_process():
+def run_training_process(model_type):
     """Exécute le training et retourne le résultat brut"""
-    return subprocess.run(
-        [sys.executable, TRAIN_SCRIPT], capture_output=True, text=True
-    )
+    pipeline_arg = "rf" if model_type == "rf" else "svd"
+    cmd = [sys.executable, TRAIN_SCRIPT, "--pipeline", pipeline_arg]
+    return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def get_list_of_reports():
-    if not os.path.exists(REPORT_DIR):
+def get_list_of_reports(model_type):
+    target_dir = os.path.join(REPORT_BASE_DIR, model_type)
+    if not os.path.exists(target_dir):
         return []
     files = [
         f
-        for f in os.listdir(REPORT_DIR)
-        if f.startswith("drift_report_20") and f.endswith(".html")
+        for f in os.listdir(target_dir)
+        if f.startswith("drift_report_") and f.endswith(".html")
     ]
     files.sort(reverse=True)
     return files
@@ -54,31 +52,38 @@ if "last_action_result" not in st.session_state:
 with st.sidebar:
     st.header("🎮 Actions MLOps")
 
+    # SÉLECTEUR DE MODÈLE
+    selected_model = st.selectbox(
+        "Sélectionner le modèle :",
+        ["Random Forest (Content-Based)", "SVD (Collaborative Filtering)"],
+    )
+
+    # Map selection to code
+    model_code = "rf" if "Random Forest" in selected_model else "svd"
+    st.info(f"Modèle actif : **{model_code.upper()}**")
+
     # Bouton Analyse
     if st.button("🔍 Analyser le Drift", use_container_width=True):
-        with st.spinner("🕵️‍♂️ Analyse en cours..."):
-            res = run_analysis_process()
+        with st.spinner(f"🕵️‍♂️ Analyse en cours ({model_code})..."):
+            res = run_analysis_process(model_code)
             # On stocke le résultat et le type d'action
             st.session_state["last_action_result"] = {"type": "analysis", "data": res}
 
     # Bouton Entraînement
     if st.button("🏋️‍♂️ Lancer un Entraînement", type="primary", use_container_width=True):
-        with st.spinner("🏋️‍♂️ Entraînement en cours..."):
-            res = run_training_process()
+        with st.spinner(f"🏋️‍♂️ Entraînement en cours ({model_code})..."):
+            res = run_training_process(model_code)
             st.session_state["last_action_result"] = {"type": "training", "data": res}
 
     st.divider()
 
     st.header("📚 Historique")
-    report_files = get_list_of_reports()
+    report_files = get_list_of_reports(model_code)
 
     selected_file = None
     if report_files:
         file_options = {
-            f: f.replace("drift_report_", "")
-            .replace(".html", "")
-            .replace("_", " à ")
-            .replace("-", "/")
+            f: f.replace("drift_report_", "").replace(".html", "").replace("_", " à ")
             for f in report_files
         }
         selected_file = st.selectbox(
@@ -87,7 +92,7 @@ with st.sidebar:
             format_func=lambda x: file_options[x],
         )
     else:
-        st.info("Aucun historique disponible.")
+        st.info(f"Aucun historique pour {model_code}.")
 
 
 # --- ZONE D'AFFICHAGE DES MESSAGES (AU CENTRE) ---
@@ -110,10 +115,11 @@ if result_state:
             with st.expander("Voir les détails techniques"):
                 st.code(res.stdout)
         elif res.returncode == 2:
-            st.warning("💤 **Analyse ignorée :** Pas assez de nouvelles données.")
-            st.info(
-                "Il faut plus de 50 nouvelles interactions depuis le dernier entraînement pour lancer une analyse fiable."
+            st.warning(
+                "💤 **Analyse ignorée :** Pas assez de nouvelles données ou pas de référence."
             )
+            with st.expander("Voir les logs"):
+                st.code(res.stdout)
         else:
             st.error("❌ Erreur technique.")
             st.code(res.stderr)
@@ -139,28 +145,35 @@ if result_state:
 
 if selected_file:
     # Affichage d'un rapport historique
-    file_path = os.path.join(REPORT_DIR, selected_file)
-    display_date = (
-        selected_file.replace("drift_report_", "")
-        .replace(".html", "")
-        .replace("_", " à ")
-    )
+    file_path = os.path.join(REPORT_BASE_DIR, model_code, selected_file)
 
     st.divider()
-    st.subheader(f"📄 Rapport archivé du {display_date}")
+    # Safe checks
+    if os.path.exists(file_path):
+        display_date = (
+            selected_file.replace("drift_report_", "")
+            .replace(".html", "")
+            .replace("_", " à ")
+        )
+        st.subheader(f"📄 Rapport archivé du {display_date} ({model_code.upper()})")
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        html_content = f.read()
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
 
-    st.download_button("📥 Télécharger", html_content, selected_file, "text/html")
-    components.html(html_content, height=1000, scrolling=True)
+        st.download_button("📥 Télécharger", html_content, selected_file, "text/html")
+        components.html(html_content, height=1000, scrolling=True)
+    else:
+        st.error("Fichier introuvable.")
 
-elif os.path.exists(os.path.join(REPORT_DIR, "drift_report_latest.html")):
-    # Affichage du dernier rapport par défaut
-    if not result_state:  # On évite de surcharger si on vient d'afficher un message
+# Optional: Default to latest if available (and not just ran an action that failed)
+elif not result_state and report_files:
+    # Show latest by default
+    latest_file = report_files[0]
+    file_path = os.path.join(REPORT_BASE_DIR, model_code, latest_file)
+    if os.path.exists(file_path):
         st.divider()
-        st.info("Visualisation du dernier rapport disponible (Latest).")
-        with open(
-            os.path.join(REPORT_DIR, "drift_report_latest.html"), "r", encoding="utf-8"
-        ) as f:
+        st.info(
+            f"Visualisation du dernier rapport disponible pour {model_code.upper()}."
+        )
+        with open(file_path, "r", encoding="utf-8") as f:
             components.html(f.read(), height=1000, scrolling=True)

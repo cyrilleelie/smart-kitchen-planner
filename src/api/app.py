@@ -14,9 +14,9 @@ import os  # <--- AJOUT IMPORTANT
 from src.database.connection import get_db, SessionLocal
 from src.database.models import User, Interaction, Recipe, PredictionLog
 
-from src.recommender.inference_service import InferenceService
 import json
 import logging
+import ast
 from src.utils.logging_config import setup_logging
 
 # Setup logging
@@ -194,6 +194,7 @@ def get_contextual_recommendations(
     request: Request,
     context_request: ContextRequest = Body(...),
     db: Session = Depends(get_db),
+    model_type: str = "collaborative",
 ):
     """
     Get 5 contextual recipe recommendations based on AI model.
@@ -216,15 +217,28 @@ def get_contextual_recommendations(
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
 
-    # Instantiation du service avec la session DB
-    service = InferenceService(db)
+    # Use the new multi‑model recommendation service
+    from src.domain.recommendation_service import generate_recommendations
 
-    # Appel du service MLflow
-    recommendations = service.recommend(user_id=request.user_id, n=5)
+    # Build constraints dict from the request (example fields)
+    constraints = {}
+    if hasattr(context_request, "vegetarian"):
+        constraints["vegetarian"] = context_request.vegetarian
+    if hasattr(context_request, "max_time"):
+        constraints["max_time"] = context_request.max_time
+
+    # Generate recommendations using selected model type
+    # Returns List[Tuple[Recipe, float]]
+    results = generate_recommendations(
+        db=db,
+        user_id=context_request.user_id,
+        constraints=constraints,
+        top_n=5,
+        model_type=model_type,
+    )
 
     response = []
-    for item in recommendations:
-        recipe = item["recipe"]
+    for recipe, score in results:
         cals = 0.0
         try:
             if recipe.nutrition_info:
@@ -233,13 +247,12 @@ def get_contextual_recommendations(
         except Exception as e:
             logger.warning(f"Failed to parse nutrition_info in recommendation: {e}")
             pass
-
         response.append(
             RecipeRecommendation(
                 id=recipe.id,
                 name=recipe.name,
                 minutes=recipe.minutes,
-                score=round(item["score"], 2),
+                score=round(score, 2),  # Use the actual model score
                 calories=cals,
             )
         )
@@ -272,20 +285,22 @@ def generate_planning_batch(
     daily_menus = {d: {} for d in range(1, request.days + 1)}
 
     # Instantiation du service
-    service = InferenceService(db)
+    # service = InferenceService(db) # REMPLACÉ par generate_weekly_plan
+    from src.domain.recommendation_service import generate_weekly_plan
 
     # --- A. GESTION DES REPAS PRINCIPAUX (MIDI & SOIR) ---
     # Si on demande MIDI (1) ET SOIR (2), on utilise la stratégie 'Batch & Split'
     if 1 in selected_set and 2 in selected_set:
         # On génère 2x recettes d'un coup avec le contexte 'Déjeuner' (1)
         # On suppose que Déjeuner/Dîner sont interchangeables pour le modèle principal
-        main_meals = service.recommend_weekly_batch(
+        main_meals = generate_weekly_plan(
+            db=db,
             user_id=request.user_id,
             meal_type=1,  # On utilise 1 (Midi) comme contexte générique "Plat"
             season=request.season,
-            session=db,
             n_days=request.days * 2,  # Double dose
             target_calories=request.target_calories,
+            model_type=request.model_type,  # <--- Nouveau paramètre
         )
 
         # Split : Première moitié pour midi, seconde pour le soir
@@ -309,13 +324,14 @@ def generate_planning_batch(
             continue
 
         # Appel standard pour 1 type de repas
-        meals = service.recommend_weekly_batch(
+        meals = generate_weekly_plan(
+            db=db,
             user_id=request.user_id,
-            meal_type=m_id,  # C'est ici qu'on passe le meal_type requis !
+            meal_type=m_id,
             season=request.season,
-            session=db,
             n_days=request.days,
             target_calories=request.target_calories,
+            model_type=request.model_type,  # <--- Nouveau paramètre
         )
 
         for i in range(request.days):
@@ -335,37 +351,40 @@ def generate_planning_batch(
             score = item_data["score"]
             tag = item_data["tag"]
 
-            # Parsing sécurisé
+            # Parsing sécurisé (compatible JSON et Python list repr)
             cals = 0.0
             ing_list = []
             rec_tags = []
             try:
                 if recipe.nutrition_info:
                     try:
-                        cals = float(json.loads(recipe.nutrition_info)[0])
+                        # Try JSON first, fallback to eval
+                        raw = recipe.nutrition_info
+                        try:
+                            parsed = json.loads(raw)
+                        except Exception:
+                            parsed = ast.literal_eval(raw)
+                        cals = float(parsed[0])
                     except Exception:
                         pass
+
                 if recipe.ingredients:
                     try:
-                        ing_list = json.loads(
-                            recipe.ingredients
-                        )  # ast.literal_eval -> json.loads
-                        # Note: ingredients are often stored simply as text representations of lists in Python str format in some datasets
-                        # If json.loads fails, we might need a fallback or data cleaning.
-                        # For this specific case, if the data is Python list string, json.loads might fail if it uses single quotes.
-                        # Let's check if we can make it safer. The original code used ast.literal_eval.
-                        # Ideally data should be stored as JSON. For now assuming JSON or valid string.
-                        pass
+                        raw = recipe.ingredients
+                        try:
+                            ing_list = json.loads(raw)
+                        except Exception:
+                            ing_list = ast.literal_eval(raw)
                     except Exception:
-                        # Fallback for legacy format if json fails but ast works (transition period)
-                        # BUT user asked to replace ast.literal_eval.
-                        # If the DB has single quotes, json.loads WILL fail.
-                        # I will strictly follow "Replace ast.literal_eval with json.loads" but I should probably handle the single quote issue if the data is dirty.
-                        # For now, let's stick to json.loads as requested for security.
                         pass
+
                 if recipe.tags:
                     try:
-                        rec_tags = json.loads(recipe.tags)
+                        raw = recipe.tags
+                        try:
+                            rec_tags = json.loads(raw)
+                        except Exception:
+                            rec_tags = ast.literal_eval(raw)
                     except Exception:
                         pass
             except Exception:

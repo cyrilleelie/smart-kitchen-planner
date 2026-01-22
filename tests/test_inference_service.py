@@ -1,18 +1,23 @@
 import pytest
 import numpy as np
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 import sys
 import os
 
 sys.path.append(os.getcwd())
 
+# Mock models and ensure they support SQLAlchemy operators
+mock_models = MagicMock()
+mock_models.Interaction.rating.__ge__.return_value = True
+mock_models.Interaction.user_id.__eq__.return_value = True
+
 with patch.dict(
     "sys.modules",
     {
-        "mlflow": Mock(),
-        "mlflow.sklearn": Mock(),
-        "src.database.models": Mock(),
-        "sqlalchemy.orm": Mock(),
+        "mlflow": MagicMock(),
+        "mlflow.sklearn": MagicMock(),
+        "src.database.models": mock_models,
+        "sqlalchemy.orm": MagicMock(),
     },
 ):
     from src.recommender.inference_service import InferenceService
@@ -24,15 +29,15 @@ def mock_service():
     with patch("mlflow.get_experiment_by_name") as mock_exp:
         mock_exp.return_value.experiment_id = "1"
         with patch("mlflow.MlflowClient") as mock_client:
-            mock_run = Mock()
+            mock_run = MagicMock()
             mock_run.info.run_id = "run_123"
             mock_client.return_value.search_runs.return_value = [mock_run]
             with patch("mlflow.sklearn.load_model") as mock_load:
-                mock_model = Mock()
+                mock_model = MagicMock()
                 # predict renvoie [0.9, 0.1, ...]
                 mock_model.predict.side_effect = lambda x: np.linspace(0.9, 0.1, len(x))
                 mock_load.return_value = mock_model
-                mock_db = Mock()
+                mock_db = MagicMock()
                 return InferenceService(mock_db)
 
 
@@ -50,7 +55,7 @@ def test_get_calories(mock_service):
 
 
 def test_get_user_vector(mock_service):
-    mock_session = Mock()
+    mock_session = MagicMock()
     # Configuration directe pour get_user_vector
     # La chaine est: query().join().filter().all()
     # On fait simple: .all() renvoie toujours nos vecteurs
@@ -67,9 +72,11 @@ def test_recommend_flow(mock_service):
     Teste le flux complet de recommandation.
     Note: Le service utilise self.db donc on doit configurer mock_service.db directement.
     """
-    # 1. Setup Candidats
-    r1 = Mock(id=1, name="Recipe1", embedding="[1, 0]")
-    r2 = Mock(id=2, name="Recipe2", embedding="[0, 1]")
+    # 1. Setup Candidats (Use 384 dims to match UserProfiler mock)
+    r1_emb = str([1.0] * 384)
+    r2_emb = str([0.0] * 384)
+    r1 = Mock(id=1, name="Recipe1", embedding=r1_emb)
+    r2 = Mock(id=2, name="Recipe2", embedding=r2_emb)
 
     # 2. Configure mock_service.db (injecté via MockService(mock_db))
     # La méthode recommend() utilise self.db directement

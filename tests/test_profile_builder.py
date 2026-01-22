@@ -3,14 +3,21 @@ from unittest.mock import Mock, patch, MagicMock
 from sqlalchemy import text
 import src.utils.translations
 
-# --- SETUP DES MOCKS ---
-with patch.dict(
-    "sys.modules", {"src.database.models": Mock(), "sqlalchemy.orm": Mock()}
-):
-    from src.recommender.profile_builder import UserProfiler
-
 # --- CONFIG SQLALCHEMY ---
 dummy_sql = text("1=1")
+
+# --- SETUP DES MOCKS ---
+mock_models = MagicMock()
+# Mock attributes to support SQLAlchemy-like operators
+mock_models.Recipe.tags.ilike.return_value = dummy_sql
+mock_models.Recipe.name.ilike.return_value = dummy_sql
+mock_models.Recipe.embedding.__ne__.return_value = dummy_sql
+mock_models.Interaction.rating.__ge__.return_value = dummy_sql
+
+with patch.dict(
+    "sys.modules", {"src.database.models": mock_models, "sqlalchemy.orm": MagicMock()}
+):
+    from src.recommender.profile_builder import UserProfiler
 MOCK_TAGS_MAP = {"Végétarien": "vegetarian", "Rapide": "15-minutes-or-less"}
 
 

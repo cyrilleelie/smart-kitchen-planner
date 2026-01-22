@@ -16,9 +16,8 @@ raw_recipes.csv
 
 # Ignore les artefacts de ML
 mlruns/
-mlruns_old/
 reports/
-*.pkl
+# *.pkl
 *.joblib
 *.h5
 catalogue-*.whl

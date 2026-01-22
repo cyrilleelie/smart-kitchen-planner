@@ -1,0 +1,66 @@
+{
+    "username": "gourmet_french",
+    "preferences": [
+        "french",
+        "fine-dining",
+        "gourmet"
+    ],
+    "interaction_count": 500,
+    "behavior_rules": {
+        "likes": {
+            "keywords": [
+                "duck",
+                "wine",
+                "butter",
+                "cream",
+                "mushroom",
+                "truffle",
+                "cheese",
+                "french",
+                "herb",
+                "sauce",
+                "scallop",
+                "filet mignon",
+                "lobster"
+            ],
+            "rating_dist": [
+                4.0,
+                5.0
+            ],
+            "weights": [
+                0.3,
+                0.7
+            ]
+        },
+        "dislikes": {
+            "keywords": [
+                "fast food",
+                "burger",
+                "pizza",
+                "hot dog",
+                "processed",
+                "microwave",
+                "instant",
+                "canned",
+                "frozen",
+                "nuggets"
+            ],
+            "rating_dist": [
+                1.0,
+                2.0
+            ],
+            "weights": [
+                0.8,
+                0.2
+            ]
+        },
+        "neutral": {
+            "rating_dist": [
+                3.0
+            ],
+            "weights": [
+                1.0
+            ]
+        }
+    }
+}

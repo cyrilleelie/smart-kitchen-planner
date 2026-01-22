@@ -1,30 +1,43 @@
 import sys
 import os
-
-sys.path.append(os.getcwd())
+import ast
+import json
+import random
+import logging
+from dotenv import load_dotenv
 
 import pandas as pd
 import numpy as np
-import random
+import mlflow
+import mlflow.sklearn
 from sqlalchemy.orm import Session
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-import mlflow
-import mlflow.sklearn
-import ast
-from dotenv import load_dotenv
-import logging
+
+# Add current working directory to sys.path to allow local imports
+sys.path.append(os.getcwd())
+
 from src.utils.logging_config import setup_logging
+from src.database.connection import engine  # noqa: E402
+from src.database.models import Interaction, Recipe  # noqa: E402
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-
-from src.database.connection import engine  # noqa: E402
-from src.database.models import Interaction, Recipe  # noqa: E402
+try:
+    import surprise
+    from surprise import Dataset, Reader, SVD
+    from surprise.model_selection import train_test_split as surprise_train_test_split
+except ImportError:
+    surprise = None
+    Dataset = Reader = SVD = None
+    surprise_train_test_split = None
+    logger.warning(
+        "scikit-surprise is not installed; SVD pipeline will be unavailable."
+    )
 
 # --- CONFIGURATION MLOPS ---
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
@@ -295,13 +308,16 @@ def train():
         logger.info("   💾 Sauvegarde de la Reference Data pour Evidently...")
 
         # On reconstitue un DataFrame propre pour le futur monitoring
-        # On sauve X_train (features) + y_train (target réelle)
-        # C'est ce que le modèle "connaît" par coeur.
+        # On sauve X_train (features) + y_train (target réelle) + prediction
+
+        # 1. Calcul des prédictions sur le jeu d'entraînement (Reference)
+        train_preds = model.predict(X_train)
 
         # Note: X_train est un numpy array, on le convertit en DF pour plus de clarté
-        # Idéalement, nomme tes colonnes si tu peux, sinon des indices suffisent
         ref_df = pd.DataFrame(X_train)
+        ref_df.columns = ref_df.columns.astype(str)  # Force string headers
         ref_df["target"] = y_train
+        ref_df["prediction"] = train_preds
 
         # On sauvegarde en CSV localement puis on l'envoie sur MLflow
         ref_path = "reference_data.csv"
@@ -323,8 +339,114 @@ def train():
         mlflow.log_metric("mae", mae)
 
         mlflow.sklearn.log_model(model, "model")
-        logger.info("   💾 Modèle sauvegardé !")
+        logger.info("   💾 Modèle sauvegardé dans MLflow !")
+
+        # Save locally as fallback
+        import joblib
+
+        local_path = "src/models/rf_model.pkl"
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        joblib.dump(model, local_path)
+        logger.info(f"   💾 Modèle sauvegardé localement : {local_path}")
+
+
+# New SVD training pipeline using scikit-surprise
+def train_svd():
+    logger.info("🚀 Démarrage de l'entraînement du modèle SVD (scikit-surprise)...")
+    with Session(engine) as session:
+        results = session.query(Interaction, Recipe).join(Recipe).all()
+        if not results:
+            logger.error("   ❌ Erreur : Pas de données pour SVD.")
+            return
+        data = []
+        for interaction, recipe in results:
+            data.append(
+                {
+                    "user_id": interaction.user_id,
+                    "recipe_id": recipe.id,
+                    "rating": interaction.rating,
+                }
+            )
+    df = pd.DataFrame(data)
+    reader = Reader(rating_scale=(1, 5))
+    surprise_data = Dataset.load_from_df(df[["user_id", "recipe_id", "rating"]], reader)
+    trainset, testset = surprise_train_test_split(
+        surprise_data, test_size=0.2, random_state=42
+    )
+    print(f"   📡 Connexion à MLflow ({MLFLOW_URI})...")
+    mlflow.set_tracking_uri(MLFLOW_URI)
+    mlflow.set_experiment(EXPERIMENT_NAME)
+
+    with mlflow.start_run(run_name="SVD_Collaborative_Filtering"):
+        # 1. Load Optimized Params if available
+        params_path = "src/models/svd_best_params.json"
+        if os.path.exists(params_path):
+            logger.info(f"   ⚙️  Loading optimized SVD parameters from {params_path}...")
+            with open(params_path, "r") as f:
+                best_params = json.load(f)
+            # Ensure keys match SVD arguments
+            params = best_params
+        else:
+            logger.info("   ⚙️  Using default SVD parameters.")
+            params = {
+                "n_factors": 100,
+                "n_epochs": 20,
+                "lr_all": 0.005,
+                "reg_all": 0.02,
+            }
+
+        mlflow.log_params(params)
+
+        # 2. Train Model
+        algo = SVD(**params)
+        algo.fit(trainset)
+        predictions = algo.test(testset)
+        svd_rmse = surprise.accuracy.rmse(predictions, verbose=False)
+
+        logger.info(f"   ✅ SVD RMSE: {svd_rmse:.4f}")
+        mlflow.log_metric("rmse", svd_rmse)
+
+        os.makedirs(os.path.dirname("src/models/svd_model.pkl"), exist_ok=True)
+        surprise.dump.dump("src/models/svd_model.pkl", algo=algo)
+        logger.info("   💾 Modèle SVD sauvegardé !")
+
+        # Log model file as artifact because surprise is not directly supported by mlflow.sklearn
+        # Save reference data (Rating, Prediction) for monitoring
+        # Prediction on trainset (approximate 'reference' distribution)
+        train_preds = algo.test(trainset.build_testset())
+        ref_data = []
+        for p in train_preds:
+            ref_data.append(
+                {
+                    "user_id": p.uid,
+                    "recipe_id": p.iid,
+                    "rating": p.r_ui,
+                    "prediction": p.est,
+                }
+            )
+
+        ref_df = pd.DataFrame(ref_data)
+        ref_path = "reference_data.csv"
+        ref_df.to_csv(ref_path, index=False)
+        mlflow.log_artifact(ref_path, "drift_reference")
+        if os.path.exists(ref_path):
+            os.remove(ref_path)
+
+        mlflow.log_artifact("src/models/svd_model.pkl", artifact_path="model")
 
 
 if __name__ == "__main__":
-    train()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Train recommendation models")
+    parser.add_argument(
+        "--pipeline",
+        choices=["rf", "svd"],
+        default="rf",
+        help="Select which pipeline to train: rf (Random Forest) or svd (Surprise SVD)",
+    )
+    args = parser.parse_args()
+    if args.pipeline == "svd":
+        train_svd()
+    else:
+        train()

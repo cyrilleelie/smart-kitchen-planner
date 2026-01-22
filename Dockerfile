@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
     gcc \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*  # Required for scikit-surprise compilation
 
 # Copie des fichiers Poetry
 COPY pyproject.toml ./

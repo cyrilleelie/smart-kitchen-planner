@@ -33,16 +33,14 @@ spacy = "^3.7.4"  # <--- AJOUTÉ ICI POUR CORRIGER L'ERREUR
 # MLflow 2.12.1 (Version stable Docker)
 mlflow = "2.12.1"
 
-# OR-Tools 9.9 (Compatible avec le vieux Protobuf de MLflow)
-ortools = "9.9.3963"
-
 # Monitoring de drift
 evidently = "^0.4.0"
 
 # Data Science Standard
 pandas = "^2.2.0"
 scikit-learn = "^1.4.0"
-xgboost = "^3.1.3"
+scikit-surprise = "^1.1.4"
+typing-extensions = "^4.15.0"
 
 [build-system]
 requires = ["poetry-core"]

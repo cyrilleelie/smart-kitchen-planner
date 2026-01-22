@@ -72,6 +72,27 @@ def main():
         # Sélection de la saison
         season_label = st.selectbox("Saison actuelle", list(SEASONS.keys()), index=0)
 
+    with st.sidebar:
+        # ... (keep existing code up to st.divider() before generate_btn)
+        # We need to insert the model selector before the generate button
+
+        # ... (Rest of sidebar code)
+
+        # 4. Sélection du Modèle (Nouveau) - Copied from Context Recommender
+        st.divider()
+        model_options = {
+            "🤖 Collaborative Filtering (SVD)": "collaborative",
+            "🌲 Content-Based (Random Forest)": "content_based",
+        }
+        selected_model_label = st.radio(
+            "🧠 Stratégie de Recommandation",
+            options=list(model_options.keys()),
+            index=0,
+            help="Collaborative: Basé sur les notes des autres users.\nContent-Based: Basé sur les tags et la nutrition.",
+            key="planner_model_selector",
+        )
+        model_code = model_options[selected_model_label]
+
         st.divider()
 
         generate_btn = st.button("✨ Générer le planning", type="primary")
@@ -98,6 +119,7 @@ def main():
                     "selected_meals": selected_meal_codes,
                     "season": season_code,
                     "target_calories": 600,  # Valeur indicative
+                    "model_type": model_code,  # <--- Nouveau paramètre
                 }
 
                 response = requests.post(f"{API_URL}/generate-planning", json=payload)

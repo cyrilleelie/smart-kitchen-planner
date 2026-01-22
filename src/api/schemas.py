@@ -70,3 +70,7 @@ class PlanningRequest(BaseModel):
     target_calories: int = Field(
         600, description="Cible calorique par repas (ex: 500 kcal)"
     )
+    model_type: str = Field(
+        "collaborative",
+        description="Type de modèle: 'collaborative' ou 'content_based'",
+    )

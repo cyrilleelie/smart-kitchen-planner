@@ -1,21 +1,67 @@
 {
-  "username": "Captain_Nemo",
-  "preferences": ["pescetarian", "seafood", "fish"],
+  "username": "captain_nemo",
+  "preferences": [
+    "pescetarian",
+    "seafood",
+    "fish"
+  ],
   "interaction_count": 800,
   "behavior_rules": {
     "likes": {
-      "keywords": ["salmon", "tuna", "fish", "shrimp", "crab", "lobster", "seafood", "sushi", "cod", "scallop", "lemon", "mussel", "clam"],
-      "rating_dist": [4.0, 5.0],
-      "weights": [0.3, 0.7]
+      "keywords": [
+        "salmon",
+        "tuna",
+        "fish",
+        "shrimp",
+        "crab",
+        "lobster",
+        "seafood",
+        "sushi",
+        "cod",
+        "scallop",
+        "lemon",
+        "mussel",
+        "clam"
+      ],
+      "rating_dist": [
+        4.0,
+        5.0
+      ],
+      "weights": [
+        0.3,
+        0.7
+      ]
     },
     "dislikes": {
-      "keywords": ["chicken", "beef", "pork", "steak", "burger", "sausage", "bacon", "meatball", "ribs", "lamb", "ham"],
-      "rating_dist": [1.0, 2.0],
-      "weights": [0.9, 0.1]
+      "keywords": [
+        "chicken",
+        "beef",
+        "pork",
+        "steak",
+        "burger",
+        "sausage",
+        "bacon",
+        "meatball",
+        "ribs",
+        "lamb",
+        "ham"
+      ],
+      "rating_dist": [
+        1.0,
+        2.0
+      ],
+      "weights": [
+        0.9,
+        0.1
+      ]
     },
     "neutral": {
-      "rating_dist": [3.0],
-      "weights": [1.0]
+      "rating_dist": [
+        3.0
+      ],
+      "weights": [
+        1.0
+      ]
     }
   }
 }

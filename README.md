@@ -14,10 +14,11 @@
 
 | Fonctionnalité | Description |
 |----------------|-------------|
-| 🧠 **Recommandations IA** | Modèle Random Forest entraîné sur les interactions utilisateurs |
+| 🧠 **Recommandation Hybride** | **Collaborative (SVD)** pour la personnalisation & **Content-Based (Random Forest)** pour le contexte (temps/saison) |
+| 🔄 **Stratégie 80/20** | Mix équilibré entre recettes performantes (80%) et découvertes (20%) pour éviter la routine |
 | 🔍 **Recherche Sémantique** | Embeddings Sentence-BERT (384 dimensions) pour comprendre le sens des recettes |
 | ⚖️ **Contraintes Nutritionnelles** | Respect des cibles caloriques et du temps de préparation |
-| 📊 **MLOps Intégré** | Suivi des expériences avec MLflow, détection du drift avec Evidently |
+| 📊 **MLOps Intégré** | Tracking des expériences avec MLflow (Random Forest & SVD), détection du drift avec Evidently |
 | 🛡️ **Sécurité API** | Rate Limiting (slowapi), CORS configuré, paramètres externalisés |
 
 ---
@@ -98,23 +99,42 @@ docker-compose ps
 
 ### Initialisation des Données
 
+#### Step 1 : Base de données & Recettes
 ```bash
 # Créer les tables, charger les recettes et générer les embeddings
 docker-compose exec app python src/scripts/init_db.py
 
-# Charger des recettes supplémentaires (batch de 1000 par défaut) et générer les embeddings
+# (Optionnel) Charger des recettes supplémentaires
+# Arguments : --count <nombre_de_recettes>
 docker-compose exec app python src/scripts/load_recipes.py --count 1000
+```
 
-# Charger un utilisateur avec un profil prédéfini (persona) et génère des interactions en fonction du profil (nombre en paramètre dans le fichier json)
-# Exemples de personas disponibles dans data/personas/
-docker-compose exec app python src/scripts/inject_persona.py data/personas/sportif.json
+#### Step 2 : Utilisateurs & Personas
+```bash
+# Initialiser TOUS les utilisateurs définis dans data/personas/
+# Cela crée les comptes et génère un historique initial d'interactions
+docker-compose exec app python src/scripts/init_personas.py
 
-# Ajouter des interactions supplémentaires à un utilisateur existant
-# Arguments : <username> <nombre> <chemin_persona>
-docker-compose exec app python src/scripts/add_interactions.py Captain_Nemo 50 data/personas/captain_nemo.json
+# (Manuel) Charger un persona spécifique
+# Arguments : <nom_persona> (fichier sans extension dans data/personas/)
+docker-compose exec app python src/scripts/inject_persona.py captain_nemo
 
-# Réinitialiser un persona (Pour supprimer un user et toutes ses interactions)
-docker-compose exec app python src/scripts/reset_persona.py Captain_Nemo
+# (Manuel) Ajouter des interactions supplémentaires
+# Arguments : <nom_persona> <nombre_interactions>
+docker-compose exec app python src/scripts/add_interactions.py captain_nemo 50
+
+# (Manuel) Supprimer un utilisateur et tout son historique (interactions & logs)
+# Arguments : <username>
+docker-compose exec app python src/scripts/delete_user.py captain_nemo
+```
+
+#### Step 3 : Simulation & Monitoring
+```bash
+
+# Simuler une activité historique (Logs + Interactions) pour tester le monitoring
+# Scanne data/personas/ pour trouver les utilisateurs correspondants
+# Arguments : --start YYYY-MM-DD --end YYYY-MM-DD --interactions <N> --simulations <M>
+docker-compose exec app python src/scripts/simulate_activity.py --start 2026-01-01 --end 2026-01-31 --interactions 5 --simulations 10
 
 ```
 
@@ -132,8 +152,8 @@ docker-compose exec app python src/scripts/reset_persona.py Captain_Nemo
 
 | Méthode | Endpoint | Description | Rate Limit |
 |---------|----------|-------------|------------|
-| `POST` | `/recommend` | Recommandations contextuelles (ML) | 30/min |
-| `POST` | `/generate-planning` | Planning avec stratégie Batch & Split | 10/min |
+| `POST` | `/recommend` | Recommandations contextuelles (Content-Based ou Collaborative) | 30/min |
+| `POST` | `/generate-planning` | Planning complet (jours, repas, calories, stratégie) | 10/min |
 | `PUT` | `/user/{id}/preferences` | Met à jour les préférences | 50/min |
 | `POST` | `/feedback` | Enregistre une note utilisateur | - |
 | `GET` | `/explore` | Découvrir de nouvelles recettes | - |
@@ -194,14 +214,15 @@ docker-compose restart app
 # Arrêter la stack
 docker-compose down
 
-# Entraîner le modèle ML
-docker-compose exec app python src/mlops/train_model.py
+# Entraîner le modèle ML (Random Forest par défaut)
+# Arguments : --pipeline <rf|svd>
+docker-compose exec app python src/mlops/train_model.py --pipeline rf
 
-# Vérifier le drift des données
-docker-compose exec app python src/mlops/monitor_drift.py
+# Entraîner le modèle de Collaborative Filtering (SVD)
+# Arguments : --pipeline <rf|svd>
+docker-compose exec app python src/mlops/train_model.py --pipeline svd
 
-# Orchestrateur MLOps (vérifie le drift et réentraîne si nécessaire)
-docker-compose exec app python src/mlops/orchestrator.py
+# Voir la section MLOps pour le Monitoring et l'Orchestration
 ```
 
 ---
@@ -219,10 +240,42 @@ docker-compose exec app python src/mlops/orchestrator.py
 
 Le projet intègre un pipeline MLOps complet :
 
-1. **Entraînement** : Random Forest sur interactions contextuelles
-2. **Tracking** : Paramètres, métriques (RMSE, MAE) et artefacts dans MLflow
-3. **Inférence** : Chargement automatique du dernier modèle
-4. **Monitoring** : Détection du drift avec Evidently (KS-test)
+1. **Entraînement Multi-Modèle** :
+    - **Random Forest (rf)** : Apprentissage contextuel (Heure, Saison, Profil) sur vecteurs sémantiques.
+    - **SVD (svd)** : Filtrage collaboratif pur (Matrix Factorization) pour la personnalisation.
+2. **Tracking** : Paramètres, métriques (RMSE, MAE) et artefacts dans MLflow.
+3. **Inférence** : Sélection dynamique de la stratégie (Content-Based vs Collaborative).
+4. **Monitoring** : Détection du drift avec Evidently.
+    - **Random Forest (rf)** : Tests KS (Embeddings) et Chi-Square (Categorical).
+    - **SVD (collaborative)** : Test Wasserstein sur les distributions de scores et ratings.
+    - **Rapports** : Générés dans `reports/rf/` et `reports/svd/`.
+
+### Automation & Monitoring
+
+**1. Monitoring (Détection de drift)**
+
+```bash
+# Random Forest
+# Arguments : --model <rf|svd>
+docker-compose exec app python src/mlops/monitor_drift.py --model rf
+
+# SVD
+# Arguments : --model <rf|svd>
+docker-compose exec app python src/mlops/monitor_drift.py --model svd
+```
+
+**2. Orchestrateur (Monitoring + Réentraînement auto)**
+L'orchestrateur lance le monitoring et déclenche un réentraînement si un drift est détecté.
+
+```bash
+# Pipeline Random Forest
+# Arguments : --model <rf|svd>
+docker-compose exec app python src/mlops/orchestrator.py --model rf
+
+# Pipeline SVD
+# Arguments : --model <rf|svd>
+docker-compose exec app python src/mlops/orchestrator.py --model svd
+```
 
 ---
 
