@@ -303,10 +303,16 @@ docker-compose exec app python -m src.scripts.simulate_drift \
     --simulations 20 --drift-type invert
 
 # Étape 5 : Exécuter le monitoring (doit détecter le drift)
+# Pour Random Forest
 docker-compose exec app python -m src.mlops.monitor_drift --model rf
+# Pour SVD
+docker-compose exec app python -m src.mlops.monitor_drift --model svd
 
 # Étape 6 : Tester l'orchestrateur (monitoring + réentraînement auto si drift)
+# Pour Random Forest
 docker-compose exec app python -m src.mlops.orchestrator --model rf
+# Pour SVD
+docker-compose exec app python -m src.mlops.orchestrator --model svd
 ```
 
 #### Types de drift disponibles
@@ -318,19 +324,25 @@ docker-compose exec app python -m src.mlops.orchestrator --model rf
 | `offset` | Ajoute un biais aux scores | +1.5 sur tous les scores |
 | `random` | Scores complètement aléatoires | Ignore les profils persona |
 
-#### Stratégie de détection
+#### Stratégie de détection par modèle
 
 Le monitoring utilise une **sliding window** comparant deux périodes :
 - **Référence** : `[J-14, J-7]` — Données de la semaine précédente
 - **Courant** : `[J-7, J-0]` — Données des 7 derniers jours
 
-**Features analysées** (approche cosine similarity) :
+**Random Forest (RF)** — Approche cosine similarity :
 | Feature | Type | Test statistique |
 |---------|------|-----------------|
 | `cosine_similarity` | Numérique | Wasserstein |
 | `prediction` | Numérique | Wasserstein |
 | `meal_type` | Catégoriel | Chi² |
 | `season` | Catégoriel | Chi² |
+
+**SVD (Collaborative Filtering)** :
+| Feature | Type | Test statistique |
+|---------|------|-----------------|
+| `rating` | Numérique | Wasserstein |
+| `prediction` | Numérique | Wasserstein |
 
 **Seuils de protection** :
 - Minimum 100 échantillons dans la période courante
