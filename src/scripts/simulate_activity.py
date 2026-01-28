@@ -112,8 +112,85 @@ def simulate_activity(
                         pred_score = max(1.0, min(5.0, pred_score))
 
                         # Random Context
-                        meal = random.randint(0, 2)
+                        meal = random.randint(0, 3)  # 0-3 incluant Snack
                         season = random.randint(0, 3)
+
+                        # --- CONTEXT VALIDATION SIMULATION ---
+                        # To ensure RF learns valid meal types, we penalize score if context is weird.
+                        # e.g. Breakfast (0) incompatible with "Main Dish" unless "Breakfast" tag present.
+
+                        def check_context_compatibility(recipe, meal_type, season):
+                            # Simplistic Logic relying on name or tags
+                            # Assume tags is stringified list
+                            r_name = recipe.name.lower()
+                            r_tags = recipe.tags.lower() if recipe.tags else ""
+
+                            penalty = 0.0
+
+                            # BREAKFAST RULES (0)
+                            is_breakfast_item = any(
+                                w in r_name or w in r_tags
+                                for w in [
+                                    "breakfast",
+                                    "brunch",
+                                    "pancake",
+                                    "waffle",
+                                    "egg",
+                                    "omelet",
+                                    "cereal",
+                                    "yogurt",
+                                    "fruit",
+                                    "smoothie",
+                                    "bread",
+                                    "muffin",
+                                    "toast",
+                                    "coffee",
+                                    "tea",
+                                ]
+                            )
+                            if meal_type == 0:
+                                if not is_breakfast_item:
+                                    penalty = 3.0  # Strong penalty for non-breakfast items at breakfast
+                            elif is_breakfast_item and meal_type in [1, 2]:
+                                # Optional: Penalty for eating pancakes at dinner? Maybe smaller.
+                                penalty = 1.0
+
+                            # SEASON RULES
+                            # Winter (0) -> Soup, Stew, Roast
+                            if season == 0:
+                                if any(
+                                    w in r_name or w in r_tags
+                                    for w in [
+                                        "salad",
+                                        "ice cream",
+                                        "frozen",
+                                        "summer",
+                                        "gazpacho",
+                                    ]
+                                ):
+                                    penalty += 2.0
+
+                            # Summer (2) -> Salad, Ice Cream
+                            if season == 2:
+                                if any(
+                                    w in r_name or w in r_tags
+                                    for w in [
+                                        "soup",
+                                        "stew",
+                                        "roast",
+                                        "winter",
+                                        "hot chocolate",
+                                    ]
+                                ):
+                                    penalty += 2.0
+
+                            return penalty
+
+                        penalty = check_context_compatibility(recipe, meal, season)
+
+                        # Apply penalty
+                        pred_score = pred_score - penalty
+                        pred_score = max(1.0, min(5.0, pred_score))
 
                         input_features = {
                             "recipe_id": recipe.id,

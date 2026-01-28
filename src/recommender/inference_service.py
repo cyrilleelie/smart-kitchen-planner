@@ -11,6 +11,8 @@ from src.utils.logging_config import setup_logging
 from typing import Any
 from src.recommender.profile_builder import UserProfiler
 import datetime
+from src.recommender.features import extract_explicit_features
+
 
 # Setup logging
 setup_logging()
@@ -132,6 +134,19 @@ class InferenceService:
             return np.zeros(384, dtype=np.float32)
         return np.mean(vectors, axis=0).astype(np.float32)
 
+    def _get_explicit_features_vec(self, recipe) -> np.ndarray:
+        explicit = extract_explicit_features(recipe)
+        return np.array(
+            [
+                explicit["is_breakfast"],
+                explicit["is_dishes"],
+                explicit["is_light"],
+                explicit["is_winter_comfort"],
+                explicit["is_summer_fresh"],
+            ],
+            dtype=np.float32,
+        )
+
     def recommend(self, user_id: int, n: int = 5) -> list[dict[str, Any]]:
         """
         Generate contextual recommendations for a user.
@@ -175,12 +190,17 @@ class InferenceService:
             # ATTENTION : Le modèle a été entraîné sur [UserVec(384) + RecipeVec(384) + Ctx(2)]
             # Il faut matcher EXACTEMENT la structure d'entraînement.
 
+            # ATTENTION : Le modèle s'attend à [User, Recipe, Context, Explicit]
+
+            explicit_features = self._get_explicit_features_vec(r)
+
             features = np.concatenate(
                 [
                     user_vector,
                     r_vec,
                     [self._get_meal_type_feature(hour)],
                     [self._get_season_feature(month)],
+                    explicit_features,
                 ]
             )
 
@@ -215,14 +235,13 @@ class InferenceService:
         return []
 
     def _get_meal_type_feature(self, hour: int) -> float:
-        """0: Breakfast, 1: Lunch, 2: Snack, 3: Dinner"""
+        """0: Breakfast, 1: Lunch/Dinner (Main), 2: Snack"""
         if 5 <= hour < 11:
             return 0.0
-        if 11 <= hour < 15:
-            return 1.0
         if 15 <= hour < 18:
             return 2.0
-        return 3.0  # Dinner
+        # Lunch (11-15) or Dinner (18+) -> Main Meal (1.0)
+        return 1.0
 
     def _get_season_feature(self, month: int) -> float:
         """0: Winter, 1: Spring, 2: Summer, 3: Autumn"""
@@ -264,14 +283,17 @@ class InferenceService:
         for r in recipes:
             try:
                 r_vec = self._parse_vector(r.embedding)
+                explicit_features = self._get_explicit_features_vec(r)
                 features = np.concatenate(
                     [
                         user_vector,
                         r_vec,
                         [meal_feature],
                         [season_feature],
+                        explicit_features,
                     ]
                 )
+
                 X_pred.append(features)
                 valid_candidates.append(r)
             except Exception:
@@ -355,7 +377,10 @@ class InferenceService:
         # 2. Prédiction de masse (inchangée)
         for recipe in candidates:
             r_vec = self._parse_vector(recipe.embedding)
-            combined = np.concatenate([user_vec, r_vec, context_features])
+            explicit_features = self._get_explicit_features_vec(recipe)
+            combined = np.concatenate(
+                [user_vec, r_vec, context_features, explicit_features]
+            )
             X_pred.append(combined)
             valid_candidates.append(recipe)
 

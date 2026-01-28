@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error
+from src.recommender.features import extract_explicit_features
 
 # Add current working directory to sys.path to allow local imports
 sys.path.append(os.getcwd())
@@ -272,10 +273,27 @@ def train():
 
             target_score = max(1, min(5, base_score + penalty))
 
+            explicit = extract_explicit_features(row["recipe_obj"])
+            explicit_features = np.array(
+                [
+                    explicit["is_breakfast"],
+                    explicit["is_dishes"],
+                    explicit["is_light"],
+                    explicit["is_winter_comfort"],
+                    explicit["is_summer_fresh"],
+                ],
+                dtype=np.float32,
+            )
+
             context_features = np.array(
                 [simulated_meal, simulated_season], dtype=np.float32
             )
-            combined_features = np.concatenate([u_vec, r_vec, context_features])
+
+            # Final vector structure:
+            # User(384) + Recipe(384) + Context(2) + Explicit(5) = 775 features
+            combined_features = np.concatenate(
+                [u_vec, r_vec, context_features, explicit_features]
+            )
 
             X_list.append(combined_features)
             y_list.append(target_score)
@@ -313,11 +331,44 @@ def train():
         # 1. Calcul des prédictions sur le jeu d'entraînement (Reference)
         train_preds = model.predict(X_train)
 
-        # Note: X_train est un numpy array, on le convertit en DF pour plus de clarté
-        ref_df = pd.DataFrame(X_train)
-        ref_df.columns = ref_df.columns.astype(str)  # Force string headers
-        ref_df["target"] = y_train
-        ref_df["prediction"] = train_preds
+        # TRANSFORMATION POUR MONITORING (Alignement avec monitor_drift.py)
+        # On ne veut pas monitorer 768 dimensions d'embedding.
+        # On calcule: Cosine Similarity, Context, Explicit Features.
+
+        ref_rows = []
+        for i in range(len(X_train)):
+            row_vec = X_train[i]
+            u_vec = row_vec[0:384]
+            r_vec = row_vec[384:768]
+            ctx_vec = row_vec[768:770]
+            exp_vec = row_vec[770:775]
+
+            # Cosine Sim
+            norm_u = np.linalg.norm(u_vec)
+            norm_r = np.linalg.norm(r_vec)
+            cosine = (
+                np.dot(u_vec, r_vec) / (norm_u * norm_r)
+                if (norm_u > 0 and norm_r > 0)
+                else 0.0
+            )
+
+            ref_rows.append(
+                {
+                    "cosine_similarity": cosine,
+                    "meal_type": ctx_vec[0],
+                    "season": ctx_vec[1],
+                    "is_breakfast": exp_vec[0],
+                    "is_dishes": exp_vec[1],
+                    "is_light": exp_vec[2],
+                    "is_winter": exp_vec[3],
+                    "is_summer": exp_vec[4],
+                    "target": y_train[i],
+                    "prediction": train_preds[i],
+                }
+            )
+
+        ref_df = pd.DataFrame(ref_rows)
+        # Force categorical types if needed, but numeric is fine for drift stats
 
         # On sauvegarde en CSV localement puis on l'envoie sur MLflow
         ref_path = "reference_data.csv"
