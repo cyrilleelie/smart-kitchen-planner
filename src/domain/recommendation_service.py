@@ -132,8 +132,8 @@ class HybridStrategy(RecommendationStrategy):
     - RF: Contextual relevance (meal_type, season)
 
     The combination is MULTIPLICATIVE: Score = SVD_Score * RF_Score.
-    This ensures that context acts as a gateway: if RF predicts a low score 
-    (indicating bad context fit, e.g. Steak for Breakfast), the final score 
+    This ensures that context acts as a gateway: if RF predicts a low score
+    (indicating bad context fit, e.g. Steak for Breakfast), the final score
     will be low even if the user loves Steaks (high SVD).
     """
 
@@ -173,12 +173,12 @@ class HybridStrategy(RecommendationStrategy):
         for rid in candidate_ids:
             svd_s = svd_map.get(rid, 1.0)
             rf_s = rf_map.get(rid, 1.0)
-            
+
             # Multiplicative interaction
             raw_score = svd_s * rf_s
             # Normalize back to linear scale
             hybrid_score = math.sqrt(raw_score)
-            
+
             combined.append((rid, hybrid_score))
 
         # Sort by combined score descending

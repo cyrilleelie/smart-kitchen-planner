@@ -21,6 +21,8 @@ from src.database.connection import engine  # noqa: E402
 from src.database.models import PredictionLog, Recipe, Interaction  # noqa: E402
 import numpy as np  # noqa: E402
 import ast  # noqa: E402
+from src.recommender.features import extract_explicit_features  # noqa: E402
+
 
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 mlflow.set_tracking_uri(MLFLOW_URI)
@@ -180,19 +182,40 @@ def fetch_prediction_logs(start_days=7, end_days=0, model_type="rf"):
 
                     if r_id not in recipe_cache:
                         r_obj = session.get(Recipe, r_id)
-                        recipe_cache[r_id] = (
+                        r_vec_cached = (
                             parse_vector(r_obj.embedding) if r_obj else np.zeros(384)
                         )
-                    r_vec = recipe_cache[r_id]
+                        # Extract explicit features
+                        r_ex_cached = (
+                            extract_explicit_features(r_obj)
+                            if r_obj
+                            else {
+                                "is_breakfast": 0,
+                                "is_dishes": 0,
+                                "is_light": 0,
+                                "is_winter_comfort": 0,
+                                "is_summer_fresh": 0,
+                            }
+                        )
+                        recipe_cache[r_id] = (r_vec_cached, r_ex_cached)
+
+                    r_vec, r_explicit = recipe_cache[r_id]
 
                     # Calcul de la similarité cosinus (réduit 768D → 1D)
                     cosine_sim = compute_cosine_similarity(u_vec, r_vec)
 
-                    # Construction du row avec features réduites
+                    # Construction du row avec features réduites + explicites
                     row_dict = {
                         "cosine_similarity": cosine_sim,
-                        "meal_type": str(int(meal)),  # Catégoriel
-                        "season": str(int(season)),  # Catégoriel
+                        "meal_type": float(meal),
+                        "season": float(season),
+                        "is_breakfast": float(r_explicit["is_breakfast"]),
+                        "is_dishes": float(r_explicit["is_dishes"]),
+                        "is_light": float(r_explicit["is_light"]),
+                        "is_winter": float(
+                            r_explicit["is_winter_comfort"]
+                        ),  # Map to simplified name used in train_model
+                        "is_summer": float(r_explicit["is_summer_fresh"]),
                     }
 
                     # Add Prediction Score
@@ -313,13 +336,22 @@ def monitor(model_type="rf"):
 
     if model_type == "rf":
         # RANDOM FOREST STRATEGY - Cosine Similarity Approach
-        # Au lieu de 770 features individuelles, on analyse 4 métriques clés:
-        # - cosine_similarity: capture la pertinence sémantique user↔recipe
-        # - meal_type, season: contexte catégoriel
-        # - prediction: score prédit par le modèle
+        from evidently.pipeline.column_mapping import ColumnMapping
 
-        # Features à monitorer
-        features_to_monitor = ["cosine_similarity", "meal_type", "season", "prediction"]
+        # Features à monitorer : Cosine Sim + Contexte + Explicites + Prediction
+        categorical_features = [
+            "meal_type",
+            "season",
+            "is_breakfast",
+            "is_dishes",
+            "is_light",
+            "is_winter",
+            "is_summer",
+        ]
+        numerical_features = ["cosine_similarity", "prediction"]
+
+        features_to_monitor = numerical_features + categorical_features
+
         available = [
             c
             for c in features_to_monitor
@@ -336,10 +368,19 @@ def monitor(model_type="rf"):
 
         print(f"   📉 Features analysées : {available}")
 
+        # Définition du mapping pour Evidently
+        column_mapping = ColumnMapping()
+        column_mapping.numerical_features = [
+            c for c in numerical_features if c in available
+        ]
+        column_mapping.categorical_features = [
+            c for c in categorical_features if c in available
+        ]
+
         # Configuration des tests statistiques par type de feature
         per_column_stattest = {}
         for col in available:
-            if col in ["meal_type", "season"]:
+            if col in categorical_features:
                 # Catégoriel → Chi-Square
                 per_column_stattest[col] = "chisquare"
             else:
@@ -347,12 +388,16 @@ def monitor(model_type="rf"):
                 per_column_stattest[col] = "wasserstein"
 
         # Add DatasetDriftMetric (Summary)
-        # Seuil 5% - plus équilibré avec seulement 4 features
+        # Seuil 5% sur les tests individuels
+        # Seuil 25% sur le nombre de colonnes (drift_share) :
+        #   Avec 9 colonnes, il suffit que 2-3 colonnes driftent pour déclencher l'alerte.
+        #   C'est nécessaire car les features sont corrélées (ex: meal_type + is_breakfast).
         report_metrics.append(
             DatasetDriftMetric(
                 columns=available,
                 per_column_stattest=per_column_stattest,
                 stattest_threshold=0.05,
+                drift_share=0.25,
             )
         )
 
@@ -367,6 +412,9 @@ def monitor(model_type="rf"):
 
     elif model_type == "svd":
         # SVD STRATEGY (Predictions & Target)
+
+        # Pas besoin de ColumnMapping pour SVD (features numériques uniquement)
+        column_mapping = None
 
         # A. Filter Reference (Anti-Selection Bias) - NOT NEEDED for Sliding Window
 
@@ -387,11 +435,14 @@ def monitor(model_type="rf"):
             per_column_stattest[col] = "wasserstein"
 
         # Add DatasetDriftMetric (Summary)
+        # Seuil 10% (plus tolérant que RF car ratings sont plus stables)
+        # Seuil 40% sur drift_share : 1 colonne sur 2 suffit à déclencher l'alerte
         report_metrics.append(
             DatasetDriftMetric(
                 columns=available,
                 per_column_stattest=per_column_stattest,
                 stattest_threshold=0.1,
+                drift_share=0.4,
             )
         )
 
@@ -408,7 +459,11 @@ def monitor(model_type="rf"):
     report = Report(metrics=report_metrics)
 
     try:
-        report.run(reference_data=ref_data, current_data=curr_data)
+        report.run(
+            reference_data=ref_data,
+            current_data=curr_data,
+            column_mapping=column_mapping,
+        )
     except Exception as e:
         print(f"   ❌ Erreur Evidently run: {e}")
         return STATUS_SKIPPED

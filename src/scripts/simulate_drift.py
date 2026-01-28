@@ -15,6 +15,7 @@ import os
 import argparse
 import random
 import json
+import glob
 from datetime import datetime, timedelta
 
 # Add project root to path
@@ -23,9 +24,31 @@ sys.path.append(os.getcwd())
 from sqlalchemy.orm import Session
 from src.database.connection import engine
 from src.database.models import User, Recipe, PredictionLog
+from src.scripts.inject_persona import analyze_recipe_taste, load_persona
 
 # --- CONFIGURATION ---
 RANDOM_SEED = 99  # Différent de simulate_activity.py (42)
+
+
+def load_persona_map(persona_dir="data/personas"):
+    """
+    Scans a directory for JSON persona files and builds a map:
+    { "username": { "rules": ..., "path": ... } }
+    """
+    mapping = {}
+    pattern = os.path.join(persona_dir, "*.json")
+    files = glob.glob(pattern)
+
+    for f_path in files:
+        try:
+            data = load_persona(f_path)
+            u = data.get("username")
+            if u:
+                mapping[u] = {"rules": data.get("behavior_rules", {}), "path": f_path}
+        except Exception as e:
+            print(f"   ⚠️ Error loading {f_path}: {e}")
+
+    return mapping
 
 
 def simulate_drift(
@@ -36,6 +59,9 @@ def simulate_drift(
 ):
     """
     Génère des prediction logs avec drift artificiel.
+
+    IMPORTANT: Utilise les vraies règles de goût des personas (analyze_recipe_taste)
+    pour calculer un score de base cohérent AVANT d'appliquer la transformation de drift.
 
     Args:
         start_date_str: Date de début (YYYY-MM-DD)
@@ -56,6 +82,9 @@ def simulate_drift(
     start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
     end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
 
+    # Load persona map for realistic scoring
+    persona_map = load_persona_map()
+
     with Session(engine) as session:
         users = session.query(User).all()
         recipes = session.query(Recipe).all()
@@ -75,36 +104,50 @@ def simulate_drift(
             daily_logs = []
 
             for user in users:
+                # Get persona rules for this user
+                persona_data = persona_map.get(user.username)
+                if not persona_data:
+                    print(f"   ⚠️ No persona found for {user.username}, skipping.")
+                    continue
+
+                rules = persona_data["rules"]
+
                 sample_recipes = random.sample(
                     recipes, min(len(recipes), simulations_count)
                 )
 
                 for recipe in sample_recipes:
-                    # --- DRIFT LOGIC ---
+                    # --- REALISTIC BASELINE SCORE ---
+                    # Use persona scoring logic to get coherent base score
+                    base_score = analyze_recipe_taste(recipe, rules)
+
+                    # Add small noise (like in simulate_activity.py)
+                    base_score = base_score + random.uniform(-0.2, 0.2)
+                    base_score = max(1.0, min(5.0, base_score))
+
+                    # --- DRIFT TRANSFORMATION ---
                     if drift_type == "invert":
-                        # Inverse: ce qui était bon devient mauvais et vice-versa
-                        base_score = random.uniform(1.0, 5.0)
+                        # Inverse: realistic score is inverted (loved → hated)
                         pred_score = 6.0 - base_score  # 5→1, 1→5, 3→3
                     elif drift_type == "offset":
-                        # Offset: tous les scores sont artificiellement élevés
-                        base_score = random.uniform(1.0, 3.5)
+                        # Offset: realistic score + systematic bias
                         pred_score = base_score + 1.5
                     elif drift_type == "random":
-                        # Aléatoire pur: ignore tout pattern
+                        # Random: ignore persona completely
                         pred_score = random.uniform(1.0, 5.0)
                     else:
-                        # Default: score normal (pas vraiment de drift)
-                        pred_score = random.uniform(2.5, 4.5)
+                        # Default: no drift, use base score
+                        pred_score = base_score
 
                     pred_score = max(1.0, min(5.0, pred_score))
 
                     # --- CONTEXT ---
                     if drift_type == "fixed_context":
-                        # Contexte fixe: force distribution uniforme → différent des données normales
+                        # Force fixed context to create drift on categorical features
                         meal = 0
                         season = 0
                     else:
-                        # Contexte aléatoire normal
+                        # Normal random context
                         meal = random.randint(0, 2)
                         season = random.randint(0, 3)
 
@@ -119,7 +162,7 @@ def simulate_drift(
                         user_id=user.id,
                         input_features=json.dumps(input_features),
                         prediction_result=json.dumps(pred_result),
-                        model_version="drift_simulated_v1",
+                        model_version="drift_simulated_v2_realistic",
                         timestamp=current_date,
                     )
                     daily_logs.append(log)
