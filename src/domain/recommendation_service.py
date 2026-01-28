@@ -124,6 +124,68 @@ class SVDSurpriseStrategy(RecommendationStrategy):
         return scores[:top_n]
 
 
+class HybridStrategy(RecommendationStrategy):
+    """Hybrid strategy combining SVD (collaborative) and RF (content-based).
+
+    This strategy combines:
+    - SVD: Personalization based on user-item interactions
+    - RF: Contextual relevance (meal_type, season)
+
+    The combination is MULTIPLICATIVE: Score = SVD_Score * RF_Score.
+    This ensures that context acts as a gateway: if RF predicts a low score 
+    (indicating bad context fit, e.g. Steak for Breakfast), the final score 
+    will be low even if the user loves Steaks (high SVD).
+    """
+
+    def __init__(self, db: Session):
+        self.db = db
+        self.svd_strategy = SVDSurpriseStrategy(db)
+        self.rf_strategy = RandomForestStrategy(db)
+
+    def rank(
+        self,
+        user_id: int,
+        candidate_ids: List[int],
+        top_n: int,
+        context: dict | None = None,
+    ) -> List[Tuple[int, float]]:
+        """Combine SVD and RF scores using multiplication."""
+        # Get SVD scores (scale ~1-5)
+        svd_scores = self.svd_strategy.rank(
+            user_id, candidate_ids, len(candidate_ids), context
+        )
+        svd_map = {rid: max(0.1, score) for rid, score in svd_scores}
+
+        # Get RF scores (scale ~1-5)
+        rf_scores = self.rf_strategy.rank(
+            user_id, candidate_ids, len(candidate_ids), context
+        )
+        rf_map = {rid: max(0.1, score) for rid, score in rf_scores}
+
+        # Combine scores : Multiplicative approach
+        # SVD(5) * RF(1) = 5
+        # SVD(5) * RF(5) = 25
+        # We take the SQRT to bring it back to a roughly 1-5 scale.
+        # sqrt(25) = 5, sqrt(5) ~= 2.2, sqrt(1) = 1
+        combined: List[Tuple[int, float]] = []
+        import math
+
+        for rid in candidate_ids:
+            svd_s = svd_map.get(rid, 1.0)
+            rf_s = rf_map.get(rid, 1.0)
+            
+            # Multiplicative interaction
+            raw_score = svd_s * rf_s
+            # Normalize back to linear scale
+            hybrid_score = math.sqrt(raw_score)
+            
+            combined.append((rid, hybrid_score))
+
+        # Sort by combined score descending
+        combined.sort(key=lambda x: x[1], reverse=True)
+        return combined[:top_n]
+
+
 def _apply_constraints(db: Session, constraints: dict) -> List[int]:
     """Return a list of recipe IDs that satisfy the supplied constraints.
 
@@ -161,8 +223,9 @@ def generate_recommendations(
     top_n: int
         Number of recipes to return.
     model_type: str
-        ``"content_based"`` for the RandomForest pipeline or ``"collaborative"``
-        for the SVD pipeline. Defaults to ``"collaborative"`` as requested.
+        ``"content_based"`` for the RandomForest pipeline, ``"collaborative"``
+        for the SVD pipeline, or ``"hybrid"`` for combined SVD+RF scoring.
+        Defaults to ``"collaborative"``.
 
     Returns
     -------
@@ -176,6 +239,8 @@ def generate_recommendations(
 
     if model_type == "content_based":
         strategy = RandomForestStrategy(db)
+    elif model_type == "hybrid":
+        strategy = HybridStrategy(db)
     else:
         strategy = SVDSurpriseStrategy(db)
 
@@ -270,6 +335,8 @@ def generate_weekly_plan(
     # 3. Rank
     if model_type == "content_based":
         strategy = RandomForestStrategy(db)
+    elif model_type == "hybrid":
+        strategy = HybridStrategy(db)
     else:
         strategy = SVDSurpriseStrategy(db)
 
