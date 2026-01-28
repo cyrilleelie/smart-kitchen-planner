@@ -72,5 +72,5 @@ class PlanningRequest(BaseModel):
     )
     model_type: str = Field(
         "collaborative",
-        description="Type de modèle: 'collaborative' ou 'content_based'",
+        description="Type de modèle: 'collaborative', 'content_based' ou 'hybrid'",
     )

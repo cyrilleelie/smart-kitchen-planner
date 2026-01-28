@@ -85,12 +85,13 @@ with st.sidebar:
     model_options = {
         "🤖 Collaborative Filtering (SVD)": "collaborative",
         "🌲 Content-Based (Random Forest)": "content_based",
+        "🔀 Hybrid (SVD * RF)": "hybrid",
     }
     selected_model_label = st.radio(
         "🧠 Stratégie de Recommandation",
         options=list(model_options.keys()),
         index=0,
-        help="Collaborative: Basé sur les notes des autres users.\nContent-Based: Basé sur les tags et la nutrition.",
+        help="Collaborative: Basé sur les notes des autres users.\nContent-Based: Basé sur les tags et la nutrition.\nHybrid: Combine SVD (Préférence) x RF (Contexte).",
     )
     model_code = model_options[selected_model_label]
 
