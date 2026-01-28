@@ -31,6 +31,12 @@ STATUS_OK = 0  # Pas de drift
 STATUS_DRIFT = 1  # Drift détecté
 STATUS_SKIPPED = 2  # Pas assez de données / Pas de référence
 
+# --- SEUILS DE VALIDATION VOLUME ---
+MIN_SAMPLES_CURRENT = 100  # Nombre minimum de logs pour une analyse significative
+MIN_VOLUME_RATIO = (
+    0.1  # Ratio min curr/ref (évite de comparer distributions déséquilibrées)
+)
+
 
 def get_last_run_info(model_type="rf"):
     """Récupère le dernier run MLflow réussi pour le modèle donné."""
@@ -82,6 +88,19 @@ def parse_vector(vec_str):
     elif isinstance(vec_str, list):
         return np.array(vec_str, dtype=np.float32)
     return np.zeros(384)
+
+
+def compute_cosine_similarity(vec_a, vec_b):
+    """
+    Calcule la similarité cosinus entre deux vecteurs.
+    Utilisé pour réduire les 768 dimensions d'embeddings en une métrique unique
+    plus pertinente pour la détection de drift.
+    """
+    norm_a = np.linalg.norm(vec_a)
+    norm_b = np.linalg.norm(vec_b)
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
 
 
 def get_user_vector(session, user_id):
@@ -138,7 +157,12 @@ def fetch_prediction_logs(start_days=7, end_days=0, model_type="rf"):
                 )
 
                 if model_type == "rf":
-                    # RF Logic (Features + Prediction)
+                    # RF Logic - Cosine Similarity Approach
+                    # Au lieu de 770 features (embeddings + context), on utilise:
+                    # - cosine_similarity: similarité user↔recipe (plus pertinent sémantiquement)
+                    # - meal_type: contexte catégoriel
+                    # - season: contexte catégoriel
+                    # - prediction: score prédit
 
                     # 1. Inputs & Context
                     u_id = log.user_id
@@ -161,10 +185,15 @@ def fetch_prediction_logs(start_days=7, end_days=0, model_type="rf"):
                         )
                     r_vec = recipe_cache[r_id]
 
-                    # Reconstruction [User(384) + Recipe(384) + Context(2)]
-                    ctx_vec = np.array([float(meal), float(season)], dtype=np.float32)
-                    full_vec = np.concatenate([u_vec, r_vec, ctx_vec])
-                    row_dict = {str(i): val for i, val in enumerate(full_vec)}
+                    # Calcul de la similarité cosinus (réduit 768D → 1D)
+                    cosine_sim = compute_cosine_similarity(u_vec, r_vec)
+
+                    # Construction du row avec features réduites
+                    row_dict = {
+                        "cosine_similarity": cosine_sim,
+                        "meal_type": str(int(meal)),  # Catégoriel
+                        "season": str(int(season)),  # Catégoriel
+                    }
 
                     # Add Prediction Score
                     pred_res = (
@@ -257,6 +286,24 @@ def monitor(model_type="rf"):
         print("   ⏭️ SKIP : En attente de plus de données pour établir une baseline.")
         return STATUS_SKIPPED
 
+    # Vérification du volume minimum de données courantes
+    if len(curr_df) < MIN_SAMPLES_CURRENT:
+        print(
+            f"   ⚠️ Volume insuffisant : {len(curr_df)} < {MIN_SAMPLES_CURRENT} échantillons."
+        )
+        print("   ⏭️ SKIP : Pas assez de données récentes pour une analyse fiable.")
+        return STATUS_SKIPPED
+
+    # Vérification du ratio de volume (évite les comparaisons déséquilibrées)
+    volume_ratio = len(curr_df) / len(ref_df)
+    if volume_ratio < MIN_VOLUME_RATIO:
+        print(
+            f"   ⚠️ Déséquilibre de volume : ratio = {volume_ratio:.2%} < {MIN_VOLUME_RATIO:.0%}"
+        )
+        print(f"      ({len(curr_df)} courant vs {len(ref_df)} référence)")
+        print("   ⏭️ SKIP : Baisse d'activité détectée, pas de drift réel.")
+        return STATUS_SKIPPED
+
     print(
         f"   📊 Volume : {len(ref_df)} (Ref: J-14->J-7) vs {len(curr_df)} (Curr: J-7->J-0)"
     )
@@ -265,74 +312,56 @@ def monitor(model_type="rf"):
     report_metrics = []
 
     if model_type == "rf":
-        # RANDOM FOREST STRATEGY (Hybrid: Features + Prediction Filtered)
+        # RANDOM FOREST STRATEGY - Cosine Similarity Approach
+        # Au lieu de 770 features individuelles, on analyse 4 métriques clés:
+        # - cosine_similarity: capture la pertinence sémantique user↔recipe
+        # - meal_type, season: contexte catégoriel
+        # - prediction: score prédit par le modèle
 
-        # A. Filter Reference by Prediction Score (Anti-Selection Bias)
-        # WITH SLIDING WINDOW (Prod vs Prod), bias is consistent, so no need to filter.
-        # We compare "Recent Recommendations" vs "Previous Recommendations".
+        # Features à monitorer
+        features_to_monitor = ["cosine_similarity", "meal_type", "season", "prediction"]
+        available = [
+            c
+            for c in features_to_monitor
+            if c in ref_df.columns and c in curr_df.columns
+        ]
 
-        # B. Prepare Feature Columns
-        # Ref columns are "0", "1", ..., "769", "target", "prediction"
-        ref_df.columns = ref_df.columns.astype(str)
-        curr_df.columns = curr_df.columns.astype(str)
-
-        # Identify numerical embeddings (0-767) vs categorical context (768, 769)
-        # Total 770 features.
-        # 0-767: Embeddings (Numerical) -> KS Test
-        # 768: Meal (Categorical) -> Chi-Square
-        # 769: Season (Categorical) -> Chi-Square
-
-        features_to_monitor = []
-        for i in range(770):
-            col_name = str(i)
-            if col_name in ref_df.columns and col_name in curr_df.columns:
-                features_to_monitor.append(col_name)
-
-        if not features_to_monitor:
+        if not available:
             print("   ⚠️ Aucune feature commune trouvée.")
             return STATUS_SKIPPED
 
         # Select data
-        ref_data = ref_df[features_to_monitor].copy()  # Ensure copy
-        curr_data = curr_df[features_to_monitor].copy()
+        ref_data = ref_df[available].copy()
+        curr_data = curr_df[available].copy()
 
-        print(
-            f"   📉 Features analysées : {len(features_to_monitor)} colonnes (Embeddings + Context)"
-        )
+        print(f"   📉 Features analysées : {available}")
 
-        # C. Configure Tests
-        # Use DatasetDriftMetric for a summary report instead of individual ColumnDriftMetric
-        # Map columns to specific tests using DataDriftOptions
-
+        # Configuration des tests statistiques par type de feature
         per_column_stattest = {}
-        for col in features_to_monitor:
-            idx = int(col)
-            if idx >= 768:
-                # Categorical (Context)
-                ref_data[col] = ref_data[col].astype(str)
-                curr_data[col] = curr_data[col].astype(str)
+        for col in available:
+            if col in ["meal_type", "season"]:
+                # Catégoriel → Chi-Square
                 per_column_stattest[col] = "chisquare"
             else:
-                # Numerical (Embeddings)
-                per_column_stattest[col] = "ks"
+                # Numérique (cosine_similarity, prediction) → Wasserstein
+                per_column_stattest[col] = "wasserstein"
 
-        # Add DatasetDriftMetric (Summary) using explicit per-column tests
-        # We set stattest_threshold to 0.01 (1%) instead of 0.05 to reduce false positives
-        # due to the natural selection bias of the recommender (Exploration vs Exploitation).
+        # Add DatasetDriftMetric (Summary)
+        # Seuil 5% - plus équilibré avec seulement 4 features
         report_metrics.append(
             DatasetDriftMetric(
-                columns=features_to_monitor,
+                columns=available,
                 per_column_stattest=per_column_stattest,
-                stattest_threshold=0.01,
+                stattest_threshold=0.05,
             )
         )
 
-        # Add DataDriftTable for detailed (but concise) list of drifting features.
+        # Add DataDriftTable for detailed view
         report_metrics.append(
             DataDriftTable(
-                columns=features_to_monitor,
+                columns=available,
                 per_column_stattest=per_column_stattest,
-                stattest_threshold=0.01,
+                stattest_threshold=0.05,
             )
         )
 

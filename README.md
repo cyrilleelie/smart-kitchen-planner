@@ -277,6 +277,65 @@ docker-compose exec app python src/mlops/orchestrator.py --model rf
 docker-compose exec app python src/mlops/orchestrator.py --model svd
 ```
 
+### Simulation de Drift (Tests)
+
+Le projet inclut un script dédié pour simuler du drift et tester le pipeline de monitoring.
+
+#### Processus de test complet
+
+```bash
+# Étape 1 : Réinitialiser la base avec des recettes
+docker-compose exec app python -m src.scripts.init_db
+
+# Étape 2 : Créer les utilisateurs (personas)
+docker-compose exec app python -m src.scripts.init_personas
+
+# Étape 3 : Simuler une période de RÉFÉRENCE (comportement normal)
+# Génère des interactions et logs sur la période J-14 à J-7
+docker-compose exec app python -m src.scripts.simulate_activity \
+    --start 2026-01-14 --end 2026-01-20 \
+    --interactions 10 --simulations 20
+
+# Étape 4 : Simuler une période avec DRIFT (comportement anormal)
+# Utilise le script simulate_drift.py avec un type de drift
+docker-compose exec app python -m src.scripts.simulate_drift \
+    --start 2026-01-21 --end 2026-01-28 \
+    --simulations 20 --drift-type invert
+
+# Étape 5 : Exécuter le monitoring (doit détecter le drift)
+docker-compose exec app python -m src.mlops.monitor_drift --model rf
+
+# Étape 6 : Tester l'orchestrateur (monitoring + réentraînement auto si drift)
+docker-compose exec app python -m src.mlops.orchestrator --model rf
+```
+
+#### Types de drift disponibles
+
+| Type | Description | Effet sur les données |
+|------|-------------|----------------------|
+| `invert` | Inverse les scores | 5→1, 1→5 |
+| `fixed_context` | Force un contexte fixe | meal_type=0, season=0 |
+| `offset` | Ajoute un biais aux scores | +1.5 sur tous les scores |
+| `random` | Scores complètement aléatoires | Ignore les profils persona |
+
+#### Stratégie de détection
+
+Le monitoring utilise une **sliding window** comparant deux périodes :
+- **Référence** : `[J-14, J-7]` — Données de la semaine précédente
+- **Courant** : `[J-7, J-0]` — Données des 7 derniers jours
+
+**Features analysées** (approche cosine similarity) :
+| Feature | Type | Test statistique |
+|---------|------|-----------------|
+| `cosine_similarity` | Numérique | Wasserstein |
+| `prediction` | Numérique | Wasserstein |
+| `meal_type` | Catégoriel | Chi² |
+| `season` | Catégoriel | Chi² |
+
+**Seuils de protection** :
+- Minimum 100 échantillons dans la période courante
+- Ratio volume courant/référence ≥ 10%
+
 ---
 
 ## 🤝 Contribution
