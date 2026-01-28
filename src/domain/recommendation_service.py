@@ -356,12 +356,13 @@ def generate_weekly_plan(
     for rid, score in ranked:
         all_results.append({"recipe": recipe_map[rid], "score": score, "tag": None})
 
-    # If using collaborative filtering, return purely the top recommendations (Performance)
-    # as requested by the user.
-    if model_type == "collaborative":
+    # If using collaborative or hybrid filtering, return purely the top recommendations (Performance)
+    # to ensure strict adherence to context (Hybrid) or user preference (SVD).
+    if model_type in ["collaborative", "hybrid"]:
+        tag_label = "Hybrid" if model_type == "hybrid" else "SVD"
         final_selection = []
         for item in all_results[:n_days]:
-            item["tag"] = "SVD"  # Or keep None, or "Collaborative"
+            item["tag"] = tag_label
             final_selection.append(item)
         return final_selection
 
