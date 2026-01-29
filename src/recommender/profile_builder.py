@@ -107,8 +107,23 @@ class UserProfiler:
                     tag_vectors = [vec for vec in tag_vectors if vec]
                     if tag_vectors:
                         avg_tag_vec = np.mean(tag_vectors, axis=0)
-                        # Poids fort (x3)
-                        vectors.extend([avg_tag_vec] * 3)
+                        
+                        # IDF-based weighting: rare tags get higher weight
+                        total_recipes = self.db.query(Recipe).count()
+                        tag_recipe_count = len(sample_recipes)
+                        
+                        # Calculate IDF score: log(total / tag_count)
+                        idf_score = np.log(total_recipes / max(1, tag_recipe_count))
+                        
+                        # Convert to integer weight (min 1, max 10)
+                        idf_weight = max(1, min(10, int(idf_score * 3)))
+                        
+                        logger.info(
+                            f"   📊 Tag '{tag}': {tag_recipe_count} recipes → IDF weight = {idf_weight}"
+                        )
+                        
+                        # Apply IDF-weighted repetition
+                        vectors.extend([avg_tag_vec] * idf_weight)
                 else:
                     logger.warning(f"   ⚠️ Tag '{tag}' ignoré (aucune recette trouvée).")
 
