@@ -75,6 +75,8 @@ def test_get_weighted_profile_full_flow(mock_or, mock_profiler):
                 fixed_recipe
             ]
             m.filter.return_value.all.return_value = [fixed_recipe]
+            # Ajout pour le calcul IDF
+            m.count.return_value = 100
         elif "Interaction" in model_name:
             m.filter.return_value.all.return_value = [fixed_interaction]
         elif "User" in model_name:
