@@ -170,7 +170,7 @@ docker-compose exec app pytest tests/ -v --cov=src
 .venv/Scripts/python.exe -m pytest tests/ -v --cov=src
 ```
 
-**Current coverage:** ~85% (32 tests)
+**Current coverage:** ~73% (38 tests)
 
 ---
 
@@ -538,7 +538,7 @@ docker-compose exec app pytest tests/ -v --cov=src
 .venv/Scripts/python.exe -m pytest tests/ -v --cov=src
 ```
 
-**Couverture actuelle :** ~85% (32 tests)
+**Couverture actuelle :** ~73% (38 tests)
 
 ---
 
